@@ -13961,7 +13961,7 @@ mq_update_position (PARSER_CONTEXT * parser, PT_NODE * old_select_list, PT_NODE 
 	  /* link partition and order lists together */
 	  for (link = partition_by; link && link->next; link = link->next)
 	    {
-	      ;
+	      ;			/* move link to the last node of partition_by list */
 	    }
 	  if (link)
 	    {
@@ -13984,13 +13984,14 @@ mq_update_position (PARSER_CONTEXT * parser, PT_NODE * old_select_list, PT_NODE 
 		}
 
 	      value = order->info.sort_spec.expr;
-	      /* resolve sort spec */
+	      /* retrieve the order-th node from the old_select_list */
 	      expr = pt_resolve_sort_spec_expr (parser, order, old_select_list);
 	      if (expr == NULL)
 		{
 		  return NULL;
 		}
 
+	      /* find the position of sort_spec expr in the new_select_list and update it with that position number */
 	      for (new_col = new_select_list, index = 1; new_col; new_col = new_col->next, index++)
 		{
 		  if ((expr->node_type == PT_NAME || expr->node_type == PT_DOT_)
@@ -14009,6 +14010,7 @@ mq_update_position (PARSER_CONTEXT * parser, PT_NODE * old_select_list, PT_NODE 
 		}
 	    }
 
+	  /* un-link partition and order lists */
 	  if (link)
 	    {
 	      col->info.function.analytic.order_by = link->next;
