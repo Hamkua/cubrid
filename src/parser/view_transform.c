@@ -13991,7 +13991,7 @@ mq_update_analytic_order_position (PARSER_CONTEXT * parser, PT_NODE * select_lis
 
 	  for (order = order_list; order; order = order->next)
 	    {
-	      PT_NODE *expr, *new_attr;
+	      PT_NODE *old_attr, *new_attr;
 	      int index;
 
 	      if (!PT_IS_VALUE_NODE (order->info.sort_spec.expr))
@@ -14001,8 +14001,8 @@ mq_update_analytic_order_position (PARSER_CONTEXT * parser, PT_NODE * select_lis
 
 	      value = order->info.sort_spec.expr;
 	      /* retrieve the order-th node from the old_attrs */
-	      expr = pt_resolve_sort_spec_expr (parser, order, old_attrs);
-	      if (expr == NULL)
+	      old_attr = pt_resolve_sort_spec_expr (parser, order, old_attrs);
+	      if (old_attr == NULL)
 		{
 		  return NULL;
 		}
@@ -14010,18 +14010,13 @@ mq_update_analytic_order_position (PARSER_CONTEXT * parser, PT_NODE * select_lis
 	      /* find the position of sort_spec expr in the new_attrs and update it with that position number */
 	      for (new_attr = new_attrs, index = 1; new_attr; new_attr = new_attr->next, index++)
 		{
-		  if ((expr->node_type == PT_NAME || expr->node_type == PT_DOT_)
-		      && (new_attr->node_type == PT_NAME || new_attr->node_type == PT_DOT_))
+		  if (pt_str_compare (old_attr->info.name.original, new_attr->info.name.original, CASE_INSENSITIVE) ==
+		      0)
 		    {
-		      /* we have comparable names */
-		      if (pt_check_path_eq_without_spec_id (parser, expr, new_attr) == 0)
-			{
-			  /* name match */
-			  value->info.value.data_value.i = index;
-			  order->info.sort_spec.pos_descr.pos_no = index;
+		      value->info.value.data_value.i = index;
+		      order->info.sort_spec.pos_descr.pos_no = index;
 
-			  break;
-			}
+		      break;
 		    }
 		}
 	    }

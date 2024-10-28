@@ -14281,128 +14281,6 @@ pt_check_path_eq (PARSER_CONTEXT * parser, const PT_NODE * p, const PT_NODE * q)
   return 0;
 }
 
-
-/*
- * pt_check_path_eq_without_spec_id () - determine if two path expressions are the same, but do not compare the spec_id when making this determination.
- *   return: 0 if two path expressions are the same, else non-zero.
- *   parser(in):
- *   p(in):
- *   q(in):
- */
-int
-pt_check_path_eq_without_spec_id (PARSER_CONTEXT * parser, const PT_NODE * p, const PT_NODE * q)
-{
-  PT_NODE_TYPE n;
-
-  if (p == NULL && q == NULL)
-    {
-      return 0;
-    }
-
-  if (p == NULL || q == NULL)
-    {
-      return 1;
-    }
-
-  CAST_POINTER_TO_NODE (p);
-  CAST_POINTER_TO_NODE (q);
-
-  /* check node types are same */
-  if (p->node_type != q->node_type)
-    {
-      return 1;
-    }
-
-  n = p->node_type;
-  switch (n)
-    {
-
-    case PT_NAME:
-      if (pt_user_specified_name_compare (p->info.name.original, q->info.name.original))
-	{
-	  return 1;
-	}
-      break;			/* PT_NAME */
-
-      /* EXPR must be X.Y.Z. */
-    case PT_DOT_:
-      if (pt_check_path_eq_without_spec_id (parser, p->info.dot.arg1, q->info.dot.arg1))
-	{
-	  return 1;
-	}
-
-      if (p->info.dot.arg2 == NULL || q->info.dot.arg2 == NULL)
-	{
-	  return 1;
-	}
-
-      if (p->info.dot.arg2->node_type != PT_NAME || q->info.dot.arg2->node_type != PT_NAME)
-	{
-	  return 1;
-	}
-
-      if (pt_str_compare (p->info.dot.arg2->info.name.original, q->info.dot.arg2->info.name.original, CASE_INSENSITIVE))
-	{
-	  return 1;
-	}
-
-      break;			/* PT_DOT_ */
-
-    case PT_EXPR:
-      {
-	if (p->info.expr.op != q->info.expr.op)
-	  {
-	    return 1;
-	  }
-
-	if (pt_check_path_eq_without_spec_id (parser, p->info.expr.arg1, q->info.expr.arg1))
-	  {
-	    return 1;
-	  }
-
-	if (pt_check_path_eq_without_spec_id (parser, p->info.expr.arg2, q->info.expr.arg2))
-	  {
-	    return 1;
-	  }
-
-	if (pt_check_path_eq_without_spec_id (parser, p->info.expr.arg3, q->info.expr.arg3))
-	  {
-	    return 1;
-	  }
-      }
-      break;			/* PT_EXPR */
-
-    case PT_VALUE:
-      {
-	const char *p_str = NULL;
-	const char *q_str = NULL;
-	unsigned int save_custom;
-
-	save_custom = parser->custom_print;	/* save */
-	parser->custom_print |= PT_CONVERT_RANGE;
-
-	p_str = parser_print_tree (parser, p);
-	q_str = parser_print_tree (parser, q);
-
-	parser->custom_print = save_custom;	/* restore */
-
-	if (pt_str_compare (p_str, q_str, CASE_INSENSITIVE))
-	  {
-	    return 1;
-	  }
-      }
-      break;			/* PT_VALUE */
-
-    default:
-      PT_ERRORmf (parser, p, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_SORT_SPEC_NAN_PATH,
-		  pt_short_print (parser, p));
-      return 1;
-    }
-
-  return 0;
-}
-
-
 /*
  * pt_check_class_eq () - determine if two class name expressions are the same
  *   return: 0 if two class name expressions are the same, else non-zero
@@ -15823,7 +15701,6 @@ pt_compare_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * expr1, PT_NODE * e
   /* no match */
   return false;
 }
-
 
 /*
  * pt_find_matching_sort_spec - find a matching sort spec in a spec list
