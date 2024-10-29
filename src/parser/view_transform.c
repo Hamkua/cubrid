@@ -409,8 +409,8 @@ static void mq_copy_sql_hint (PARSER_CONTEXT * parser, PT_NODE * dest_query, PT_
 static bool mq_is_rownum_only_predicate (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * node, PT_NODE * order_by,
 					 PT_NODE * subquery, PT_NODE * class_);
 
-static PT_NODE *mq_update_analytic_order_position (PARSER_CONTEXT * parser, PT_NODE * select_list, PT_NODE * old_attrs,
-						   PT_NODE * new_attrs);
+static PT_NODE *mq_update_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * select_list, PT_NODE * old_attrs,
+					  PT_NODE * new_attrs);
 
 /*
  * mq_is_outer_join_spec () - determine if a spec is outer joined in a spec list
@@ -2502,7 +2502,7 @@ mq_substitute_subquery_in_statement (PARSER_CONTEXT * parser, PT_NODE * statemen
   bool is_only_spec;
   PUSHABLE_TYPE is_mergeable;
   PT_NODE *old_attrs;
-
+  bool has_analytic;
 
   result = tmp_result = NULL;	/* init */
   class_spec = NULL;
@@ -2579,19 +2579,23 @@ mq_substitute_subquery_in_statement (PARSER_CONTEXT * parser, PT_NODE * statemen
 	  PT_NODE *tmp_class = NULL;
 	  bool is_removable_select_list = mq_is_removable_select_list (parser, query_spec, tmp_result) == PUSHABLE;
 
-	  old_attrs = mq_fetch_attributes (parser, class_spec->info.spec.flat_entity_list);
-
-	  if (old_attrs == NULL && (pt_has_error (parser) || er_has_error ()))
+	  has_analytic = pt_has_analytic (parser, query_spec);
+	  if (has_analytic)
 	    {
-	      goto exit_on_error;
-	    }
+	      old_attrs = mq_fetch_attributes (parser, class_spec->info.spec.flat_entity_list);
 
-	  old_attrs = parser_copy_tree_list (parser, old_attrs);
+	      if (old_attrs == NULL && (pt_has_error (parser) || er_has_error ()))
+		{
+		  goto exit_on_error;
+		}
 
-	  /* exclude the first oid attr */
-	  if (old_attrs && old_attrs->type_enum == PT_TYPE_OBJECT)
-	    {
-	      old_attrs = old_attrs->next;	/* skip oid attr */
+	      /* exclude the first oid attr */
+	      if (old_attrs && old_attrs->type_enum == PT_TYPE_OBJECT)
+		{
+		  old_attrs = old_attrs->next;	/* skip oid attr */
+		}
+
+	      old_attrs = parser_copy_tree_list (parser, old_attrs);
 	    }
 
 	  /* rewrite vclass spec */
@@ -2648,13 +2652,16 @@ mq_substitute_subquery_in_statement (PARSER_CONTEXT * parser, PT_NODE * statemen
 	      goto exit_on_error;
 	    }
 
-	  derived_table->info.query.q.select.list =
-	    mq_update_analytic_order_position (parser, derived_table->info.query.q.select.list, old_attrs,
-					       class_spec->info.spec.as_attr_list);
-
-	  if (old_attrs)
+	  if (has_analytic)
 	    {
-	      parser_free_tree (parser, old_attrs);
+	      derived_table->info.query.q.select.list =
+		mq_update_sort_spec_expr (parser, derived_table->info.query.q.select.list, old_attrs,
+					  class_spec->info.spec.as_attr_list);
+
+	      if (old_attrs)
+		{
+		  parser_free_tree (parser, old_attrs);
+		}
 	    }
 
 	  if (derived_table->info.query.q.select.list == NULL)
@@ -13954,15 +13961,14 @@ mq_copy_sql_hint (PARSER_CONTEXT * parser, PT_NODE * dest_query, PT_NODE * src_q
 }
 
 /*
- * mq_update_analytic_order_position() - update PT_VALUE located within the OVER clause of the analytic function.
+ * mq_update_sort_spec_expr() - update PT_VALUE located within the OVER clause of the analytic function.
  *   return:
  *   parser(in):
  *   before_query(in): 
  *   spec(in):
  */
 static PT_NODE *
-mq_update_analytic_order_position (PARSER_CONTEXT * parser, PT_NODE * select_list, PT_NODE * old_attrs,
-				   PT_NODE * new_attrs)
+mq_update_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * select_list, PT_NODE * old_attrs, PT_NODE * new_attrs)
 {
   PT_NODE *partition_by, *order_by;
   PT_NODE *col, *link, *order_list, *order, *value;
@@ -14002,10 +14008,7 @@ mq_update_analytic_order_position (PARSER_CONTEXT * parser, PT_NODE * select_lis
 	      value = order->info.sort_spec.expr;
 	      /* retrieve the order-th node from the old_attrs */
 	      old_attr = pt_resolve_sort_spec_expr (parser, order, old_attrs);
-	      if (old_attr == NULL)
-		{
-		  return NULL;
-		}
+	      assert (old_attr != NULL);
 
 	      /* find the position of sort_spec expr in the new_attrs and update it with that position number */
 	      for (new_attr = new_attrs, index = 1; new_attr; new_attr = new_attr->next, index++)
@@ -14019,12 +14022,12 @@ mq_update_analytic_order_position (PARSER_CONTEXT * parser, PT_NODE * select_lis
 		      break;
 		    }
 		}
+	      assert (new_attr != NULL);
 	    }
 
-	  /* un-link partition and order lists */
+	  /* un-link */
 	  if (link)
 	    {
-	      col->info.function.analytic.order_by = link->next;
 	      link->next = NULL;
 	    }
 	}
