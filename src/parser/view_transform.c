@@ -409,7 +409,7 @@ static void mq_copy_sql_hint (PARSER_CONTEXT * parser, PT_NODE * dest_query, PT_
 static bool mq_is_rownum_only_predicate (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * node, PT_NODE * order_by,
 					 PT_NODE * subquery, PT_NODE * class_);
 
-static PT_NODE *mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * class_);
+static PT_NODE *mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_attrs);
 
 /*
  * mq_is_outer_join_spec () - determine if a spec is outer joined in a spec list
@@ -2497,6 +2497,7 @@ mq_substitute_subquery_in_statement (PARSER_CONTEXT * parser, PT_NODE * statemen
   PT_NODE *tmp_result, *result, *arg1, *arg2, *statement_next;
   PT_NODE *class_spec, *statement_spec = NULL;
   PT_NODE *derived_table, *derived_spec, *derived_class;
+  PT_NODE *attributes;
   bool is_pushable_query, is_outer_joined;
   bool is_only_spec;
   PUSHABLE_TYPE is_mergeable;
@@ -2630,10 +2631,26 @@ mq_substitute_subquery_in_statement (PARSER_CONTEXT * parser, PT_NODE * statemen
 	      goto exit_on_error;
 	    }
 
-	  derived_table->info.query.q.select.list = mq_update_analytic_sort_spec_expr (parser, class_spec, class_);
-	  if (derived_table->info.query.q.select.list == NULL)
-	    {			/* error */
-	      goto exit_on_error;
+	  if (pt_has_analytic (parser, derived_table))
+	    {
+	      attributes = mq_fetch_attributes (parser, class_);
+	      if (attributes == NULL)
+		{
+		  goto exit_on_error;
+		}
+
+	      /* exclude the first oid attr */
+	      if (attributes->type_enum == PT_TYPE_OBJECT)
+		{
+		  attributes = attributes->next;	/* skip oid attr */
+		}
+
+	      derived_table->info.query.q.select.list =
+		mq_update_analytic_sort_spec_expr (parser, class_spec, attributes);
+	      if (derived_table->info.query.q.select.list == NULL)
+		{		/* error */
+		  goto exit_on_error;
+		}
 	    }
 
 	  if (PT_IS_QUERY (derived_table))
@@ -13939,30 +13956,13 @@ mq_copy_sql_hint (PARSER_CONTEXT * parser, PT_NODE * dest_query, PT_NODE * src_q
  * Therefore, it is necessary to update the sort_spec expression of the analytic functions.
  */
 static PT_NODE *
-mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * class_)
+mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_attrs)
 {
   PT_NODE *partition_by, *order_by;
   PT_NODE *col, *link, *order_list, *order, *value;
-  PT_NODE *derived_table, *old_attrs, *new_attrs;
+  PT_NODE *derived_table, *new_attrs;
 
   derived_table = spec->info.spec.derived_table;
-  if (!pt_has_analytic (parser, derived_table))
-    {
-      return derived_table->info.query.q.select.list;
-    }
-
-  old_attrs = mq_fetch_attributes (parser, class_);
-  if (old_attrs == NULL)
-    {
-      return derived_table->info.query.q.select.list;
-    }
-
-  /* exclude the first oid attr */
-  if (old_attrs->type_enum == PT_TYPE_OBJECT)
-    {
-      old_attrs = old_attrs->next;	/* skip oid attr */
-    }
-
   new_attrs = spec->info.spec.as_attr_list;
 
   for (col = derived_table->info.query.q.select.list; col; col = col->next)
