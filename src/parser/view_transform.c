@@ -13946,19 +13946,23 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
   PT_NODE *derived_table, *old_attrs, *new_attrs;
 
   derived_table = spec->info.spec.derived_table;
+  if (!pt_has_analytic (parser, derived_table))
+    {
+      return derived_table->info.query.q.select.list;
+    }
+
   old_attrs = mq_fetch_attributes (parser, class_);
-  if (!pt_has_analytic (parser, derived_table) || old_attrs == NULL)
+  if (old_attrs == NULL)
     {
       return derived_table->info.query.q.select.list;
     }
 
   /* exclude the first oid attr */
-  if (old_attrs && old_attrs->type_enum == PT_TYPE_OBJECT)
+  if (old_attrs->type_enum == PT_TYPE_OBJECT)
     {
       old_attrs = old_attrs->next;	/* skip oid attr */
     }
 
-  old_attrs = parser_copy_tree_list (parser, old_attrs);
   new_attrs = spec->info.spec.as_attr_list;
 
   for (col = derived_table->info.query.q.select.list; col; col = col->next)
@@ -14023,11 +14027,6 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 	      link->next = NULL;
 	    }
 	}
-    }
-
-  if (old_attrs)
-    {
-      parser_free_tree (parser, old_attrs);
     }
 
   return derived_table->info.query.q.select.list;
