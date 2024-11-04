@@ -14082,8 +14082,12 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 				  old_index);
 		      return NULL;
 		    }
+
 		  old_select_node = parser_copy_tree (parser, old_select_node);
-		  old_select_node->info.name.spec_id = (derived_table->info.query.q.select.from)->info.spec.id;
+		  if (PT_IS_NAME_NODE (old_select_node))
+		    {
+		      old_select_node->info.name.spec_id = PT_SPEC_ID (derived_table->info.query.q.select.from);
+		    }
 
 		  parser_append_node (old_select_node, derived_table->info.query.q.select.list);
 
