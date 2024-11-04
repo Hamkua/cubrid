@@ -1476,6 +1476,7 @@ mq_remove_select_list_for_inline_view (PARSER_CONTEXT * parser, PT_NODE * statem
   PT_NODE *query_spec_columns, *tmp_query, *save_order_by, *save_select_list;
   PT_NODE *attributes, *attr, *as_attr_list;
   PT_NODE *col, *new_select_list, *spec, *pred, *subquery;
+  PT_NODE *derived_table;
 
   assert (PT_IS_SELECT (statement));
   if (derived_spec == NULL || !PT_SPEC_IS_DERIVED (derived_spec))
@@ -1612,6 +1613,7 @@ mq_remove_select_list_for_inline_view (PARSER_CONTEXT * parser, PT_NODE * statem
     {
       PT_SELECT_INFO_SET_FLAG (spec->info.spec.derived_table, PT_SELECT_INFO_HAS_ANALYTIC);
 
+      derived_table = derived_spec->info.spec.derived_table;
       /*
        * e.g. drop table if exists ta, tb;
        *      create table ta (ca int, cb int, cc int);
@@ -1638,8 +1640,7 @@ mq_remove_select_list_for_inline_view (PARSER_CONTEXT * parser, PT_NODE * statem
        *        -  after : a.cb,   b.cb,   row_number() over (partition by 1 order by b.cc)
        */
       tmp_query->info.query.q.select.list = mq_update_analytic_sort_spec_expr (parser, spec,
-									       (derived_spec->info.spec.derived_table)->
-									       info.query.q.select.list,
+									       derived_table->info.query.q.select.list,
 									       derived_spec->info.spec.as_attr_list);
       if (tmp_query->info.query.q.select.list == NULL)
 	{			/* error */
@@ -14085,6 +14086,10 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 		  old_select_node->info.name.spec_id = (derived_table->info.query.q.select.from)->info.spec.id;
 
 		  parser_append_node (old_select_node, derived_table->info.query.q.select.list);
+
+		  /* If an attribute does not exist in the attr_list, 
+		   * the position number should be determined by the length of the updated select-list, rather than the length of the attr_list */
+		  index = pt_length_of_list (derived_table->info.query.q.select.list);
 		}
 
 	      value->info.value.data_value.i = index;
