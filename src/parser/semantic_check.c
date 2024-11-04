@@ -247,7 +247,6 @@ static PT_NODE *pt_check_vclass_union_spec (PARSER_CONTEXT * parser, PT_NODE * q
 static int pt_check_group_concat_order_by (PARSER_CONTEXT * parser, PT_NODE * func);
 static bool pt_has_parameters (PARSER_CONTEXT * parser, PT_NODE * stmt);
 static PT_NODE *pt_is_parameter_node (PARSER_CONTEXT * parser, PT_NODE * node, void *arg, int *continue_walk);
-static PT_NODE *pt_resolve_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * sort_spec, PT_NODE * select_list);
 static bool pt_compare_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * expr1, PT_NODE * expr2);
 static PT_NODE *pt_find_matching_sort_spec (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * spec_list,
 					    PT_NODE * select_list);
@@ -7255,27 +7254,6 @@ pt_is_compatible_type (const PT_TYPE_ENUM arg1_type, const PT_TYPE_ENUM arg2_typ
 }
 
 /*
- * pt_check_vclass_attr_qspec_compatible () -
- *   return:
- *   parser(in):
- *   attr(in):
- *   col(in):
- */
-static PT_UNION_COMPATIBLE
-pt_check_vclass_attr_qspec_compatible (PARSER_CONTEXT * parser, PT_NODE * attr, PT_NODE * col)
-{
-  bool is_object_type;
-  PT_UNION_COMPATIBLE c = pt_union_compatible (parser, attr, col, true, &is_object_type);
-
-  if (c == PT_UNION_INCOMP && pt_is_compatible_type (attr->type_enum, col->type_enum))
-    {
-      c = PT_UNION_COMP;
-    }
-
-  return c;
-}
-
-/*
  * pt_check_vclass_union_spec () -
  *   return:
  *   parser(in):
@@ -7570,11 +7548,6 @@ pt_check_vclass_query_spec (PARSER_CONTEXT * parser, PT_NODE * qry, PT_NODE * at
 	      PT_ERRORmf2 (parser, col, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_ATT_INCOMPATIBLE_COL,
 			   attribute_name (parser, attr), pt_short_print (parser, col));
 	    }
-	}
-      else if (pt_check_vclass_attr_qspec_compatible (parser, attr, col) != PT_UNION_COMP)
-	{
-	  PT_ERRORmf2 (parser, col, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_ATT_INCOMPATIBLE_COL,
-		       attribute_name (parser, attr), pt_short_print (parser, col));
 	}
 
       /* any shared attribute must correspond to NA in the query_spec */
@@ -15631,7 +15604,7 @@ pt_is_parameter_node (PARSER_CONTEXT * parser, PT_NODE * node, void *arg, int *c
  *  sort_spec(in): PT_SORT_SPEC node whose expression must be resolved
  *  select_list(in): statement's select list for PT_VALUE lookup
  */
-static PT_NODE *
+PT_NODE *
 pt_resolve_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * sort_spec, PT_NODE * select_list)
 {
   PT_NODE *expr, *resolved;
