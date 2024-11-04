@@ -409,7 +409,10 @@ static void mq_copy_sql_hint (PARSER_CONTEXT * parser, PT_NODE * dest_query, PT_
 static bool mq_is_rownum_only_predicate (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * node, PT_NODE * order_by,
 					 PT_NODE * subquery, PT_NODE * class_);
 
-static PT_NODE *mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_attrs);
+static PT_NODE *mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_select_list,
+						   PT_NODE * old_attrs);
+static PT_NODE *mq_append_references_from_analytic (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_columns,
+						    PT_NODE * old_attrs);
 
 /*
  * mq_is_outer_join_spec () - determine if a spec is outer joined in a spec list
@@ -1472,8 +1475,7 @@ mq_remove_select_list_for_inline_view (PARSER_CONTEXT * parser, PT_NODE * statem
 {
   PT_NODE *query_spec_columns, *tmp_query, *save_order_by, *save_select_list;
   PT_NODE *attributes, *attr, *as_attr_list;
-  PT_NODE *col, *new_select_list, *spec, *pred, *subquery, *nth_node, *temp;
-  int attr_order;
+  PT_NODE *col, *new_select_list, *spec, *pred, *subquery;
 
   assert (PT_IS_SELECT (statement));
   if (derived_spec == NULL || !PT_SPEC_IS_DERIVED (derived_spec))
@@ -1560,58 +1562,6 @@ mq_remove_select_list_for_inline_view (PARSER_CONTEXT * parser, PT_NODE * statem
       /* just add one of integer value */
       new_select_list = pt_make_integer_value (parser, 1);
     }
-  else if (PT_SPEC_IS_DERIVED (spec) && spec->info.spec.derived_table_type == PT_IS_SUBQUERY)
-    {
-      spec->info.spec.referenced_attrs = new_select_list;
-
-      for (col = new_select_list; col; col = col->next)
-	{
-	  attr_order = pt_find_node_order (parser, spec->info.spec.as_attr_list, col);
-	  if (attr_order != -1)
-	    {
-	      nth_node = pt_get_node_from_list (subquery->info.query.q.select.list, attr_order - 1);
-	      assert (nth_node != NULL);
-
-	      if (PT_IS_ANALYTIC_NODE (nth_node))
-		{
-		  temp = nth_node->next;
-		  nth_node->next = NULL;
-
-		  /*
-		   * e.g. drop table if exists ta, tb;
-		   *      create table ta (ca int, cb int, cc int);
-		   *      create table tb (ca int, cb int, cc int);
-		   *
-		   *      select b_cb, b_row_number
-		   *        from ( select a.cb as a_cb,
-		   *                      b.cb as b_cb,
-		   *                      row_number () over (partition by b.cb order by b.cc) as b_row_number
-		   *                 from ta a, tb b
-		   *                where a.ca = b.ca
-		   *                limit 1 ) t;
-		   * 
-		   *      new_select_list :
-		   *                         t.b_cb, t.b_row_number
-		   *
-		   *      spec->info.spec.as_attr_list :
-		   *                   a_cb,   b_cb,   b_row_number
-		   *
-		   *      Since a_cb does not exist in new_select_list, the indexes after a_cb are decremented.
-		   *
-		   *      spec->info.spec.derived_table->info.query.q.select.list :
-		   *        - before : a.cb,   b.cb,   row_number() over (partition by 2 order by b.cc)
-		   *        -  after : a.cb,   b.cb,   row_number() over (partition by 1 order by b.cc)
-		   */
-		  parser_walk_tree (parser, nth_node, mq_update_node_order, spec, pt_continue_walk, NULL);
-
-		  nth_node->next = temp;
-		}
-	    }
-	}
-
-      new_select_list = spec->info.spec.referenced_attrs;
-      spec->info.spec.referenced_attrs = NULL;
-    }
 
   /* cut off select list and order by */
   save_order_by = subquery->info.query.order_by;
@@ -1645,26 +1595,57 @@ mq_remove_select_list_for_inline_view (PARSER_CONTEXT * parser, PT_NODE * statem
   /* substitute attributes for query_spec_columns in statement */
   tmp_query = mq_lambda (parser, tmp_query, attributes, query_spec_columns);
 
-  if (PT_SELECT_INFO_IS_FLAGED (tmp_query, PT_SELECT_INFO_HAS_ANALYTIC))
-    {
-      /* If analytic functions are not used in new_select_list, they are removed from the subquery.
-       * If no analytic functions are used anymore, PT_SELECT_INFO_HAS_ANALYTIC should be cleared.
-       * If PT_SELECT_INFO_HAS_ANALYTIC is set, pt_has_analytic skips pt_is_analytic_node and pt_is_analytic_node_post,
-       * so it needs to be cleared first. After that, check again whether PT_SELECT_INFO_HAS_ANALYTIC should be set.
-       */
-      PT_SELECT_INFO_CLEAR_FLAG (tmp_query, PT_SELECT_INFO_HAS_ANALYTIC);
-      if (pt_has_analytic (parser, tmp_query))
-	{
-	  PT_SELECT_INFO_SET_FLAG (tmp_query, PT_SELECT_INFO_HAS_ANALYTIC);
-	}
-    }
-
   /* assign tmp_query */
   parser_free_tree (parser, spec->info.spec.derived_table);
   spec->info.spec.derived_table = tmp_query;
 
   parser_free_tree (parser, spec->info.spec.as_attr_list);
   spec->info.spec.as_attr_list = as_attr_list;
+
+  /* If analytic functions are not used in new_select_list, they are removed from the subquery.
+   * If no analytic functions are used anymore, PT_SELECT_INFO_HAS_ANALYTIC should be cleared.
+   * If PT_SELECT_INFO_HAS_ANALYTIC is set, pt_has_analytic skips pt_is_analytic_node and pt_is_analytic_node_post,
+   * so it needs to be cleared first. After that, check again whether PT_SELECT_INFO_HAS_ANALYTIC should be set.
+   */
+  PT_SELECT_INFO_CLEAR_FLAG (spec->info.spec.derived_table, PT_SELECT_INFO_HAS_ANALYTIC);
+  if (pt_has_analytic (parser, spec->info.spec.derived_table))
+    {
+      PT_SELECT_INFO_SET_FLAG (spec->info.spec.derived_table, PT_SELECT_INFO_HAS_ANALYTIC);
+
+      /*
+       * e.g. drop table if exists ta, tb;
+       *      create table ta (ca int, cb int, cc int);
+       *      create table tb (ca int, cb int, cc int);
+       *
+       *      select b_cb, b_row_number
+       *        from ( select a.cb as a_cb,
+       *                      b.cb as b_cb,
+       *                      row_number () over (partition by b.cb order by b.cc) as b_row_number
+       *                 from ta a, tb b
+       *                where a.ca = b.ca
+       *                limit 1 ) t;
+       * 
+       *      spec->info.query.q.select.list :
+       *                         t.b_cb, t.b_row_number
+       *
+       *      derived_spec->info.spec.as_attr_list :
+       *                   a_cb,   b_cb,   b_row_number
+       *
+       *      Since a_cb does not exist in spec->info.query.q.select.list, the indexes after a_cb are decremented.
+       *
+       *      spec->info.spec.derived_table->info.query.q.select.list :
+       *        - before : a.cb,   b.cb,   row_number() over (partition by 2 order by b.cc)
+       *        -  after : a.cb,   b.cb,   row_number() over (partition by 1 order by b.cc)
+       */
+      tmp_query->info.query.q.select.list = mq_update_analytic_sort_spec_expr (parser, spec,
+									       (derived_spec->info.spec.derived_table)->
+									       info.query.q.select.list,
+									       derived_spec->info.spec.as_attr_list);
+      if (tmp_query->info.query.q.select.list == NULL)
+	{			/* error */
+	  goto exit_on_error;
+	}
+    }
 
   *new_spec = spec;
 
@@ -2637,11 +2618,6 @@ mq_substitute_subquery_in_statement (PARSER_CONTEXT * parser, PT_NODE * statemen
 	  PT_NODE *tmp_class = NULL;
 	  bool is_removable_select_list = mq_is_removable_select_list (parser, query_spec, tmp_result) == PUSHABLE;
 
-	  if (is_removable_select_list && pt_has_analytic (parser, query_spec))
-	    {
-	      is_removable_select_list = false;
-	    }
-
 	  /* rewrite vclass spec */
 	  class_spec =
 	    mq_rewrite_vclass_spec_as_derived (parser, tmp_result, class_spec, query_spec, is_removable_select_list);
@@ -2696,8 +2672,11 @@ mq_substitute_subquery_in_statement (PARSER_CONTEXT * parser, PT_NODE * statemen
 	      goto exit_on_error;
 	    }
 
+	  PT_SELECT_INFO_CLEAR_FLAG (derived_table, PT_SELECT_INFO_HAS_ANALYTIC);
 	  if (pt_has_analytic (parser, derived_table))
 	    {
+	      PT_SELECT_INFO_SET_FLAG (derived_table, PT_SELECT_INFO_HAS_ANALYTIC);
+
 	      attributes = mq_fetch_attributes (parser, class_);
 	      if (attributes == NULL)
 		{
@@ -2711,7 +2690,8 @@ mq_substitute_subquery_in_statement (PARSER_CONTEXT * parser, PT_NODE * statemen
 		}
 
 	      derived_table->info.query.q.select.list =
-		mq_update_analytic_sort_spec_expr (parser, class_spec, attributes);
+		mq_update_analytic_sort_spec_expr (parser, class_spec, query_spec->info.query.q.select.list,
+						   attributes);
 	      if (derived_table->info.query.q.select.list == NULL)
 		{		/* error */
 		  goto exit_on_error;
@@ -8534,75 +8514,6 @@ mq_get_references_node (PARSER_CONTEXT * parser, PT_NODE * node, void *void_arg,
   return node;
 }
 
-/*
- * mq_update_node_order()
- *   return:
- *   parser(in):
- *   tree(in):
- *   arg(in):
- *   continue_walk(in/out):
- */
-static PT_NODE *
-mq_update_node_order (PARSER_CONTEXT * parser, PT_NODE * tree, void *arg, int *continue_walk)
-{
-  PT_NODE *spec = (PT_NODE *) arg;
-  PT_NODE *nth_node, *value_node;
-  int index, select_order;
-
-  if (tree == NULL || (!PT_IS_SORT_SPEC_NODE (tree) && !pt_is_analytic_function (parser, tree)))
-    {
-      *continue_walk = PT_STOP_WALK;
-    }
-
-  if (PT_IS_SORT_SPEC_NODE (tree) && PT_IS_VALUE_NODE (tree->info.sort_spec.expr))
-    {
-      value_node = tree->info.sort_spec.expr;
-      select_order = value_node->info.value.data_value.i;
-
-      nth_node = pt_get_node_from_list (spec->info.spec.as_attr_list, select_order - 1);
-      if (nth_node != NULL)
-	{
-	  mq_insert_symbol (parser, &spec->info.spec.referenced_attrs, nth_node);
-	  index = pt_find_node_order (parser, spec->info.spec.referenced_attrs, nth_node);
-
-	  if (index != -1)
-	    {
-	      value_node->info.value.data_value.i = index;
-	      tree->info.sort_spec.pos_descr.pos_no = index;
-	    }
-	}
-    }
-
-  return tree;
-}
-
-/*
- * pt_find_node_order() - finds the position of node in a node_list 
- *   return:
- *   parser(in):
- *   node_list(in): 
- *   node(in):
- */
-static int
-pt_find_node_order (PARSER_CONTEXT * parser, PT_NODE * node_list, PT_NODE * node)
-{
-  PT_NODE *col;
-  int index;
-  const char *col_name, *node_name;
-
-  node_name = (PT_IS_NAME_NODE (node)) ? node->info.name.original : node->alias_print;
-
-  for (col = node_list, index = 1; col; col = col->next, index++)
-    {
-      col_name = (PT_IS_NAME_NODE (col)) ? col->info.name.original : col->alias_print;
-      if (pt_str_compare (col_name, node_name, CASE_INSENSITIVE) == 0)
-	{
-	  return index;
-	}
-    }
-
-  return -1;
-}
 
 /*
  * mq_reset_ids_and_references() - re-sets path entities of a spec by
@@ -14083,14 +13994,16 @@ mq_copy_sql_hint (PARSER_CONTEXT * parser, PT_NODE * dest_query, PT_NODE * src_q
  *   return:
  *   parser(in):
  *   spec(in): 
- *   class_(in):
+ *   old_select_list(in):
+ *   old_attrs(in):
  * 
- * NOTE: After calling mq_rewrite_vclass_spec_as_derived(), the order of nodes in the select list may change.
+ * NOTE: After calling mq_rewrite_vclass_spec_as_derived() or mq_remove_select_list_for_inline_view(), the order of nodes in the select list may change.
  * When analytic functions are included, query results can vary based on the order of nodes in the select list.
  * Therefore, it is necessary to update the sort_spec expression of the analytic functions.
  */
 static PT_NODE *
-mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_attrs)
+mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_select_list,
+				   PT_NODE * old_attrs)
 {
   PT_NODE *partition_by, *order_by;
   PT_NODE *col, *link, *order_list, *order, *value;
@@ -14123,8 +14036,9 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 
 	  for (order = order_list; order; order = order->next)
 	    {
-	      PT_NODE *old_attr, *new_attr;
-	      int index;
+	      PT_NODE *old_select_node, *old_attr, *new_attr;
+	      int old_index, index;
+	      bool found = false;
 
 	      if (!PT_IS_VALUE_NODE (order->info.sort_spec.expr))
 		{
@@ -14132,6 +14046,8 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 		}
 
 	      value = order->info.sort_spec.expr;
+	      old_index = value->info.value.data_value.i;
+
 	      /* retrieve the order-th node from the old_attrs */
 	      old_attr = pt_resolve_sort_spec_expr (parser, order, old_attrs);
 	      if (old_attr == NULL)
@@ -14146,13 +14062,33 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 		  if (pt_str_compare (old_attr->info.name.original, new_attr->info.name.original, CASE_INSENSITIVE) ==
 		      0)
 		    {
-		      value->info.value.data_value.i = index;
-		      order->info.sort_spec.pos_descr.pos_no = index;
-
+		      found = true;
 		      break;
 		    }
 		}
-	      assert (new_attr != NULL);
+
+	      if (!found)
+		{
+		  if (old_select_list->type_enum != PT_TYPE_OBJECT)
+		    {
+		      old_index -= 1;
+		    }
+
+		  old_select_node = pt_get_node_from_list (old_select_list, old_index);
+		  if (old_select_node == NULL)
+		    {
+		      PT_ERRORmf (parser, order, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_SORT_SPEC_RANGE_ERR,
+				  old_index);
+		      return NULL;
+		    }
+		  old_select_node = parser_copy_tree (parser, old_select_node);
+		  old_select_node->info.name.spec_id = (derived_table->info.query.q.select.from)->info.spec.id;
+
+		  parser_append_node (old_select_node, derived_table->info.query.q.select.list);
+		}
+
+	      value->info.value.data_value.i = index;
+	      order->info.sort_spec.pos_descr.pos_no = index;
 	    }
 
 	  /* un-link */
