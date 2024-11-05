@@ -14084,12 +14084,10 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 		    }
 
 		  old_select_node = parser_copy_tree (parser, old_select_node);
-		  if (PT_IS_NAME_NODE (old_select_node))
-		    {
-		      old_select_node->info.name.spec_id = PT_SPEC_ID (derived_table->info.query.q.select.from);
-		    }
+		  parser_walk_tree (parser, old_select_node, mq_set_all_ids,
+				    derived_table->info.query.q.select.from, NULL, NULL);
 
-		  parser_append_node (old_select_node, derived_table->info.query.q.select.list);
+		  mq_insert_symbol (parser, &derived_table->info.query.q.select.list, old_select_node);
 
 		  /* If an attribute does not exist in the attr_list, 
 		   * the position number should be determined by the length of the updated select-list, rather than the length of the attr_list */
