@@ -414,6 +414,8 @@ static PT_NODE *mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_N
 static PT_NODE *mq_append_references_from_analytic (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_columns,
 						    PT_NODE * old_attrs);
 
+static PT_NODE *mq_set_proper_spec_id (PARSER_CONTEXT * parser, PT_NODE * node, void *arg, int *continue_walk);
+
 /*
  * mq_is_outer_join_spec () - determine if a spec is outer joined in a spec list
  *  returns: boolean
@@ -14070,6 +14072,8 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 
 	      if (!found)
 		{
+		  PT_NODE *from;
+
 		  if (old_select_list->type_enum != PT_TYPE_OBJECT)
 		    {
 		      old_index -= 1;
@@ -14084,8 +14088,13 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 		    }
 
 		  old_select_node = parser_copy_tree (parser, old_select_node);
-		  parser_walk_tree (parser, old_select_node, mq_set_all_ids,
-				    derived_table->info.query.q.select.from, NULL, NULL);
+
+		  from = derived_table->info.query.q.select.from;
+		  while (from)
+		    {
+		      parser_walk_tree (parser, old_select_node, mq_set_proper_spec_id, from, NULL, NULL);
+		      from = from->next;
+		    }
 
 		  parser_append_node (old_select_node, derived_table->info.query.q.select.list);
 		  mq_insert_symbol (parser, &new_attrs, old_attr);
@@ -14106,4 +14115,29 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
     }
 
   return derived_table->info.query.q.select.list;
+}
+
+static PT_NODE *
+mq_set_proper_spec_id (PARSER_CONTEXT * parser, PT_NODE * node, void *arg, int *continue_walk)
+{
+  PT_NODE *spec = (PT_NODE *) arg;
+  PT_NODE *range_var;
+  const char *resolved_name;
+
+  if (node && node->node_type == PT_NAME)
+    {
+      resolved_name = node->info.name.resolved;
+      range_var = spec->info.spec.range_var;
+      
+      if (resolved_name && range_var)
+	{
+	  if (pt_str_compare (resolved_name, range_var->info.name.original, CASE_INSENSITIVE) == 0)
+	    {
+	      node->info.name.spec_id = spec->info.spec.id;
+	      node->info.name.resolved = spec->info.spec.range_var->info.name.original;
+	    }
+	}
+    }
+
+  return node;
 }
