@@ -14039,7 +14039,7 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 
 	  for (order = order_list; order; order = order->next)
 	    {
-	      PT_NODE *old_select_node, *old_attr, *new_attr;
+	      PT_NODE *old_select_node, *new_select_node, *old_attr, *new_attr;
 	      int old_index, index;
 
 	      if (!PT_IS_VALUE_NODE (order->info.sort_spec.expr))
@@ -14094,10 +14094,47 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 		      from = from->next;
 		    }
 
-		  parser_append_node (old_select_node, derived_table->info.query.q.select.list);
-		  mq_insert_symbol (parser, &new_attrs, old_attr);
+		  /* The node you are trying to add to the select-list may already exist.
+		   * For example, in the order by clause. */
+		  for (new_select_node = derived_table->info.query.q.select.list; new_select_node;
+		       new_select_node = new_select_node->next)
+		    {
+		      if (new_select_node->type_enum == PT_TYPE_OBJECT)
+			{
+			  continue;
+			}
 
-		  index = pt_length_of_list (new_attrs);
+		      if ((old_select_node->node_type == PT_NAME || old_select_node->node_type == PT_DOT_)
+			  && (new_select_node->node_type == PT_NAME || new_select_node->node_type == PT_DOT_))
+			{
+
+			  if (pt_check_path_eq (parser, old_select_node, new_select_node) == 0)
+			    {
+			      /* name match */
+			      break;
+			    }
+			}
+		      else
+			{
+			  /* brute method, compare printed trees */
+			  char *str_old = parser_print_tree (parser, old_select_node);
+			  char *str_new = parser_print_tree (parser, new_select_node);
+
+			  if (pt_str_compare (str_old, str_new, CASE_INSENSITIVE) == 0)
+			    {
+			      /* match */
+			      break;
+			    }
+			}
+		    }
+
+		  if (new_select_node == NULL)
+		    {
+		      parser_append_node (new_select_node, derived_table->info.query.q.select.list);
+		      mq_insert_symbol (parser, &new_attrs, old_attr);
+		    }
+
+		  index = pt_length_of_list (derived_table->info.query.q.select.list);
 		}
 
 	      value->info.value.data_value.i = index;
