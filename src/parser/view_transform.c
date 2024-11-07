@@ -14041,7 +14041,6 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 	    {
 	      PT_NODE *old_select_node, *old_attr, *new_attr;
 	      int old_index, index;
-	      bool found = false;
 
 	      if (!PT_IS_VALUE_NODE (order->info.sort_spec.expr))
 		{
@@ -14065,12 +14064,11 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 		  if (pt_str_compare (old_attr->info.name.original, new_attr->info.name.original, CASE_INSENSITIVE) ==
 		      0)
 		    {
-		      found = true;
 		      break;
 		    }
 		}
 
-	      if (!found)
+	      if (new_attr == NULL)
 		{
 		  PT_NODE *from;
 
@@ -14121,17 +14119,17 @@ static PT_NODE *
 mq_set_proper_spec_id (PARSER_CONTEXT * parser, PT_NODE * node, void *arg, int *continue_walk)
 {
   PT_NODE *spec = (PT_NODE *) arg;
-  PT_NODE *range_var;
+  PT_NODE *entity_name;
   const char *resolved_name;
 
   if (node && node->node_type == PT_NAME)
     {
       resolved_name = node->info.name.resolved;
-      range_var = spec->info.spec.range_var;
-      
-      if (resolved_name && range_var)
+      entity_name = spec->info.spec.entity_name;
+
+      if (resolved_name && entity_name)
 	{
-	  if (pt_str_compare (resolved_name, range_var->info.name.original, CASE_INSENSITIVE) == 0)
+	  if (pt_str_compare (resolved_name, entity_name->info.name.original, CASE_INSENSITIVE) == 0)
 	    {
 	      node->info.name.spec_id = spec->info.spec.id;
 	      node->info.name.resolved = spec->info.spec.range_var->info.name.original;
