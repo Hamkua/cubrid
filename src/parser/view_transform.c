@@ -409,11 +409,7 @@ static void mq_copy_sql_hint (PARSER_CONTEXT * parser, PT_NODE * dest_query, PT_
 static bool mq_is_rownum_only_predicate (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * node, PT_NODE * order_by,
 					 PT_NODE * subquery, PT_NODE * class_);
 
-static PT_NODE *mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_select_list,
-						   PT_NODE * old_attrs);
-static PT_NODE *mq_append_references_from_analytic (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_columns,
-						    PT_NODE * old_attrs);
-
+static PT_NODE *mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_select_list);
 static PT_NODE *mq_set_proper_spec_id (PARSER_CONTEXT * parser, PT_NODE * node, void *arg, int *continue_walk);
 
 /*
@@ -1642,8 +1638,7 @@ mq_remove_select_list_for_inline_view (PARSER_CONTEXT * parser, PT_NODE * statem
        *        -  after : a.cb,   b.cb,   row_number() over (partition by 1 order by b.cc)
        */
       tmp_query->info.query.q.select.list = mq_update_analytic_sort_spec_expr (parser, spec,
-									       derived_table->info.query.q.select.list,
-									       derived_spec->info.spec.as_attr_list);
+									       derived_table->info.query.q.select.list);
       if (tmp_query->info.query.q.select.list == NULL)
 	{			/* error */
 	  goto exit_on_error;
@@ -2680,21 +2675,8 @@ mq_substitute_subquery_in_statement (PARSER_CONTEXT * parser, PT_NODE * statemen
 	    {
 	      PT_SELECT_INFO_SET_FLAG (derived_table, PT_SELECT_INFO_HAS_ANALYTIC);
 
-	      attributes = mq_fetch_attributes (parser, class_);
-	      if (attributes == NULL)
-		{
-		  goto exit_on_error;
-		}
-
-	      /* exclude the first oid attr */
-	      if (attributes->type_enum == PT_TYPE_OBJECT)
-		{
-		  attributes = attributes->next;	/* skip oid attr */
-		}
-
 	      derived_table->info.query.q.select.list =
-		mq_update_analytic_sort_spec_expr (parser, class_spec, query_spec->info.query.q.select.list,
-						   attributes);
+		mq_update_analytic_sort_spec_expr (parser, class_spec, query_spec->info.query.q.select.list);
 	      if (derived_table->info.query.q.select.list == NULL)
 		{		/* error */
 		  goto exit_on_error;
@@ -13998,22 +13980,19 @@ mq_copy_sql_hint (PARSER_CONTEXT * parser, PT_NODE * dest_query, PT_NODE * src_q
  *   parser(in):
  *   spec(in): 
  *   old_select_list(in):
- *   old_attrs(in):
  * 
  * NOTE: After calling mq_rewrite_vclass_spec_as_derived() or mq_remove_select_list_for_inline_view(), the order of nodes in the select list may change.
  * When analytic functions are included, query results can vary based on the order of nodes in the select list.
  * Therefore, it is necessary to update the sort_spec expression of the analytic functions.
  */
 static PT_NODE *
-mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_select_list,
-				   PT_NODE * old_attrs)
+mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_select_list)
 {
   PT_NODE *partition_by, *order_by;
   PT_NODE *col, *link, *order_list, *order, *value;
-  PT_NODE *derived_table, *new_attrs;
+  PT_NODE *derived_table;
 
   derived_table = spec->info.spec.derived_table;
-  new_attrs = spec->info.spec.as_attr_list;
 
   for (col = derived_table->info.query.q.select.list; col; col = col->next)
     {
@@ -14039,7 +14018,8 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 
 	  for (order = order_list; order; order = order->next)
 	    {
-	      PT_NODE *old_select_node, *new_select_node, *old_attr, *new_attr;
+	      PT_NODE *old_select_node, *new_select_node;
+	      PT_NODE *from;
 	      int old_index, index;
 
 	      if (!PT_IS_VALUE_NODE (order->info.sort_spec.expr))
@@ -14050,89 +14030,66 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 	      value = order->info.sort_spec.expr;
 	      old_index = value->info.value.data_value.i;
 
-	      /* retrieve the order-th node from the old_attrs */
-	      old_attr = pt_resolve_sort_spec_expr (parser, order, old_attrs);
-	      if (old_attr == NULL)
+	      if (old_select_list->type_enum != PT_TYPE_OBJECT)
 		{
-		  assert (false);
+		  old_index -= 1;
+		}
+
+	      old_select_node = pt_get_node_from_list (old_select_list, old_index);
+	      if (old_select_node == NULL)
+		{
+		  PT_ERRORmf (parser, order, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_SORT_SPEC_RANGE_ERR,
+			      old_index);
 		  return NULL;
 		}
 
-	      /* find the position of sort_spec expr in the new_attrs and update it with that position number */
-	      for (new_attr = new_attrs, index = 1; new_attr; new_attr = new_attr->next, index++)
+	      old_select_node = parser_copy_tree (parser, old_select_node);
+
+	      from = derived_table->info.query.q.select.from;
+	      while (from)
 		{
-		  if (pt_str_compare (old_attr->info.name.original, new_attr->info.name.original, CASE_INSENSITIVE) ==
-		      0)
+		  parser_walk_tree (parser, old_select_node, mq_set_proper_spec_id, from, NULL, NULL);
+		  from = from->next;
+		}
+
+	      /* The node you are trying to add to the select-list may already exist.
+	       * For example, in the order by clause. */
+	      for (new_select_node = derived_table->info.query.q.select.list, index = 1; new_select_node;
+		   new_select_node = new_select_node->next, index++)
+		{
+		  if (new_select_node->type_enum == PT_TYPE_OBJECT)
 		    {
-		      break;
+		      continue;
+		    }
+
+		  if ((old_select_node->node_type == PT_NAME || old_select_node->node_type == PT_DOT_)
+		      && (new_select_node->node_type == PT_NAME || new_select_node->node_type == PT_DOT_))
+		    {
+
+		      if (pt_check_path_eq (parser, old_select_node, new_select_node) == 0)
+			{
+			  /* name match */
+			  break;
+			}
+		    }
+		  else
+		    {
+		      /* brute method, compare printed trees */
+		      char *str_old = parser_print_tree (parser, old_select_node);
+		      char *str_new = parser_print_tree (parser, new_select_node);
+
+		      if (pt_str_compare (str_old, str_new, CASE_INSENSITIVE) == 0)
+			{
+			  /* match */
+			  break;
+			}
 		    }
 		}
 
-	      if (new_attr == NULL)
+	      if (new_select_node == NULL)
 		{
-		  PT_NODE *from;
-
-		  if (old_select_list->type_enum != PT_TYPE_OBJECT)
-		    {
-		      old_index -= 1;
-		    }
-
-		  old_select_node = pt_get_node_from_list (old_select_list, old_index);
-		  if (old_select_node == NULL)
-		    {
-		      PT_ERRORmf (parser, order, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_SORT_SPEC_RANGE_ERR,
-				  old_index);
-		      return NULL;
-		    }
-
-		  old_select_node = parser_copy_tree (parser, old_select_node);
-
-		  from = derived_table->info.query.q.select.from;
-		  while (from)
-		    {
-		      parser_walk_tree (parser, old_select_node, mq_set_proper_spec_id, from, NULL, NULL);
-		      from = from->next;
-		    }
-
-		  /* The node you are trying to add to the select-list may already exist.
-		   * For example, in the order by clause. */
-		  for (new_select_node = derived_table->info.query.q.select.list; new_select_node;
-		       new_select_node = new_select_node->next)
-		    {
-		      if (new_select_node->type_enum == PT_TYPE_OBJECT)
-			{
-			  continue;
-			}
-
-		      if ((old_select_node->node_type == PT_NAME || old_select_node->node_type == PT_DOT_)
-			  && (new_select_node->node_type == PT_NAME || new_select_node->node_type == PT_DOT_))
-			{
-
-			  if (pt_check_path_eq (parser, old_select_node, new_select_node) == 0)
-			    {
-			      /* name match */
-			      break;
-			    }
-			}
-		      else
-			{
-			  /* brute method, compare printed trees */
-			  char *str_old = parser_print_tree (parser, old_select_node);
-			  char *str_new = parser_print_tree (parser, new_select_node);
-
-			  if (pt_str_compare (str_old, str_new, CASE_INSENSITIVE) == 0)
-			    {
-			      /* match */
-			      break;
-			    }
-			}
-		    }
-
-		  if (new_select_node == NULL)
-		    {
-		      old_select_node->flag.is_hidden_column = 1;
-		      parser_append_node (old_select_node, derived_table->info.query.q.select.list);
-		    }
+		  old_select_node->flag.is_hidden_column = 1;
+		  parser_append_node (old_select_node, derived_table->info.query.q.select.list);
 
 		  index = pt_length_of_list (derived_table->info.query.q.select.list);
 		}
