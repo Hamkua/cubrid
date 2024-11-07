@@ -14045,15 +14045,17 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 
 	      old_select_node = parser_copy_tree (parser, old_select_node);
 
-	      from = derived_table->info.query.q.select.from;
-	      while (from)
+	      if (derived_table->info.query.is_view_spec)
 		{
-		  parser_walk_tree (parser, old_select_node, mq_set_proper_spec_id, from, NULL, NULL);
-		  from = from->next;
+		  /* In the case of view_spec, even if node refers to the same column, spec_id and resolved_name may differ */
+		  from = derived_table->info.query.q.select.from;
+		  while (from)
+		    {
+		      parser_walk_tree (parser, old_select_node, mq_set_proper_spec_id, from, NULL, NULL);
+		      from = from->next;
+		    }
 		}
 
-	      /* The node you are trying to add to the select-list may already exist.
-	       * For example, in the order by clause. */
 	      for (new_select_node = derived_table->info.query.q.select.list, index = 1; new_select_node;
 		   new_select_node = new_select_node->next, index++)
 		{
@@ -14088,6 +14090,7 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 
 	      if (new_select_node == NULL)
 		{
+		  /* old_select_node was not found in select-list */
 		  old_select_node->flag.is_hidden_column = 1;
 		  parser_append_node (old_select_node, derived_table->info.query.q.select.list);
 
