@@ -14130,8 +14130,8 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 
 		  if (new_select_node == NULL)
 		    {
-		      parser_append_node (new_select_node, derived_table->info.query.q.select.list);
-		      mq_insert_symbol (parser, &new_attrs, old_attr);
+		      old_select_node->flag.is_hidden_column = 1;
+		      parser_append_node (old_select_node, derived_table->info.query.q.select.list);
 		    }
 
 		  index = pt_length_of_list (derived_table->info.query.q.select.list);
