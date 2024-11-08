@@ -14120,34 +14120,45 @@ mq_set_proper_spec_id (PARSER_CONTEXT * parser, PT_NODE * node, void *arg, int *
   PT_NODE *attr;
   const char *resolved_name;
 
-  if (node == NULL || !PT_NODE_IS_NAME (node) || !PT_NODE_IS_SPEC (spec))
+  if (node == NULL || !PT_NODE_IS_SPEC (spec))
     {
       return node;
     }
 
-  if (PT_SPEC_IS_DERIVED (spec))
+  if (PT_IS_SELECT (node))
     {
-      attr = spec->info.spec.as_attr_list;
-      while (attr)
-	{
-	  if (pt_str_compare (node->info.name.original, attr->info.name.original, CASE_INSENSITIVE) == 0)
-	    {
-	      node->info.name.spec_id = spec->info.spec.id;
-	    }
-	  attr = attr->next;
-	}
-    }
-  else
-    {
-      resolved_name = node->info.name.resolved;
-      entity_name = spec->info.spec.entity_name;
+      /* don't dive into scalar subqueries */
+      *continue_walk = PT_LIST_WALK;
 
-      if (resolved_name && entity_name)
+      return node;
+    }
+
+  if (PT_IS_NAME_NODE (node))
+    {
+      if (PT_SPEC_IS_DERIVED (spec))
 	{
-	  if (pt_str_compare (resolved_name, entity_name->info.name.original, CASE_INSENSITIVE) == 0)
+	  attr = spec->info.spec.as_attr_list;
+	  while (attr)
 	    {
-	      node->info.name.spec_id = spec->info.spec.id;
-	      node->info.name.resolved = spec->info.spec.range_var->info.name.original;
+	      if (pt_str_compare (node->info.name.original, attr->info.name.original, CASE_INSENSITIVE) == 0)
+		{
+		  node->info.name.spec_id = spec->info.spec.id;
+		}
+	      attr = attr->next;
+	    }
+	}
+      else
+	{
+	  resolved_name = node->info.name.resolved;
+	  entity_name = spec->info.spec.entity_name;
+
+	  if (resolved_name && entity_name)
+	    {
+	      if (pt_str_compare (resolved_name, entity_name->info.name.original, CASE_INSENSITIVE) == 0)
+		{
+		  node->info.name.spec_id = spec->info.spec.id;
+		  node->info.name.resolved = spec->info.spec.range_var->info.name.original;
+		}
 	    }
 	}
     }
