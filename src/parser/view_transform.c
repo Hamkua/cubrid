@@ -14045,7 +14045,7 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_N
 
 	      old_select_node = parser_copy_tree (parser, old_select_node);
 
-	      if (derived_table->info.query.is_view_spec)
+	      if (derived_table->info.query.flag.vspec_as_derived)
 		{
 		  /* In the case of view_spec, even if node refers to the same column, spec_id and resolved_name may differ */
 		  from = derived_table->info.query.q.select.from;
@@ -14117,9 +14117,27 @@ mq_set_proper_spec_id (PARSER_CONTEXT * parser, PT_NODE * node, void *arg, int *
 {
   PT_NODE *spec = (PT_NODE *) arg;
   PT_NODE *entity_name;
+  PT_NODE *attr;
   const char *resolved_name;
 
-  if (node && node->node_type == PT_NAME)
+  if (node == NULL || !PT_NODE_IS_NAME (node) || !PT_NODE_IS_SPEC (spec))
+    {
+      return node;
+    }
+
+  if (PT_SPEC_IS_DERIVED (spec))
+    {
+      attr = spec->info.spec.as_attr_list;
+      while (attr)
+	{
+	  if (pt_str_compare (node->info.name.original, attr->info.name.original, CASE_INSENSITIVE) == 0)
+	    {
+	      node->info.name.spec_id = spec->info.spec.id;
+	    }
+	  attr = attr->next;
+	}
+    }
+  else
     {
       resolved_name = node->info.name.resolved;
       entity_name = spec->info.spec.entity_name;
