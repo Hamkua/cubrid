@@ -1324,15 +1324,20 @@ mq_substitute_select_in_statement (PARSER_CONTEXT * parser, PT_NODE * statement,
   /* substitute attributes for query_spec_columns in statement */
   statement = mq_lambda (parser, statement, attributes, query_spec_columns);
 
-  PT_SELECT_INFO_CLEAR_FLAG (statement, PT_SELECT_INFO_HAS_ANALYTIC);
-  if (pt_has_analytic (parser, statement))
+  /* if is_mergeable == NON_PUSHABLE, then vspec_as_derived == 1 */
+  if (statement->info.query.flag.vspec_as_derived == 1)
     {
-      PT_SELECT_INFO_SET_FLAG (statement, PT_SELECT_INFO_HAS_ANALYTIC);
+      PT_SELECT_INFO_CLEAR_FLAG (statement, PT_SELECT_INFO_HAS_ANALYTIC);
+      if (pt_has_analytic (parser, statement))
+	{
+	  PT_SELECT_INFO_SET_FLAG (statement, PT_SELECT_INFO_HAS_ANALYTIC);
 
-      statement->info.query.q.select.list = mq_update_analytic_sort_spec_expr (parser, statement, query_spec_columns);
-      if (statement->info.query.q.select.list == NULL)
-	{			/* error */
-	  return NULL;
+	  statement->info.query.q.select.list =
+	    mq_update_analytic_sort_spec_expr (parser, statement, query_spec_columns);
+	  if (statement->info.query.q.select.list == NULL)
+	    {
+	      return NULL;
+	    }
 	}
     }
 
