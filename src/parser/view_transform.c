@@ -410,7 +410,6 @@ static bool mq_is_rownum_only_predicate (PARSER_CONTEXT * parser, PT_NODE * spec
 					 PT_NODE * subquery, PT_NODE * class_);
 
 static PT_NODE *mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * spec, PT_NODE * old_select_list);
-static PT_NODE *mq_set_proper_spec_id (PARSER_CONTEXT * parser, PT_NODE * node, void *arg, int *continue_walk);
 
 /*
  * mq_is_outer_join_spec () - determine if a spec is outer joined in a spec list
@@ -1629,31 +1628,6 @@ mq_remove_select_list_for_inline_view (PARSER_CONTEXT * parser, PT_NODE * statem
       PT_SELECT_INFO_SET_FLAG (spec->info.spec.derived_table, PT_SELECT_INFO_HAS_ANALYTIC);
 
       derived_table = derived_spec->info.spec.derived_table;
-      /*
-       * e.g. drop table if exists ta, tb;
-       *      create table ta (ca int, cb int, cc int);
-       *      create table tb (ca int, cb int, cc int);
-       *
-       *      select b_cb, b_row_number
-       *        from ( select a.cb as a_cb,
-       *                      b.cb as b_cb,
-       *                      row_number () over (partition by b.cb order by b.cc) as b_row_number
-       *                 from ta a, tb b
-       *                where a.ca = b.ca
-       *                limit 1 ) t;
-       * 
-       *      spec->info.query.q.select.list :
-       *                         t.b_cb, t.b_row_number
-       *
-       *      derived_spec->info.spec.as_attr_list :
-       *                   a_cb,   b_cb,   b_row_number
-       *
-       *      Since a_cb does not exist in spec->info.query.q.select.list, the indexes after a_cb are decremented.
-       *
-       *      spec->info.spec.derived_table->info.query.q.select.list :
-       *        - before : a.cb,   b.cb,   row_number() over (partition by 2 order by b.cc)
-       *        -  after : a.cb,   b.cb,   row_number() over (partition by 1 order by b.cc)
-       */
       tmp_query->info.query.q.select.list = mq_update_analytic_sort_spec_expr (parser, spec->info.spec.derived_table,
 									       derived_table->info.query.q.select.list);
       if (tmp_query->info.query.q.select.list == NULL)
@@ -13982,7 +13956,7 @@ mq_copy_sql_hint (PARSER_CONTEXT * parser, PT_NODE * dest_query, PT_NODE * src_q
  * mq_update_analytic_sort_spec_expr() - update PT_VALUE located within the OVER clause of the analytic function.
  *   return:
  *   parser(in):
- *   spec(in): 
+ *   new_query(in): 
  *   old_select_list(in):
  * 
  * NOTE: After calling mq_rewrite_vclass_spec_as_derived() or mq_remove_select_list_for_inline_view(), the order of nodes in the select list may change.
@@ -14019,9 +13993,9 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * new_query,
 
 	  for (order = order_list; order; order = order->next)
 	    {
-	      PT_NODE *old_select_node, *new_select_node;
-	      PT_NODE *from;
+	      PT_NODE *old_select_node, *new_select_node, *referenced_node;
 	      int old_index, index;
+	      PT_NODE_TYPE type;
 
 	      if (!PT_IS_VALUE_NODE (order->info.sort_spec.expr))
 		{
@@ -14039,12 +14013,17 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * new_query,
 	      old_select_node = pt_get_node_from_list (old_select_list, old_index);
 	      if (old_select_node == NULL)
 		{
-		  PT_ERRORmf (parser, order, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_SORT_SPEC_RANGE_ERR,
+		  PT_ERRORmf (parser, new_query, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_SORT_SPEC_RANGE_ERR,
 			      old_index);
 		  return NULL;
 		}
 
-	      old_select_node = parser_copy_tree (parser, old_select_node);
+	      referenced_node = parser_copy_tree (parser, old_select_node);
+	      if (referenced_node == NULL)
+		{
+		  PT_ERRORm (parser, new_query, MSGCAT_SET_PARSER_SEMANTIC, MSGCAT_SEMANTIC_OUT_OF_MEMORY);
+		  return NULL;
+		}
 
 	      for (new_select_node = new_query->info.query.q.select.list, index = 1; new_select_node;
 		   new_select_node = new_select_node->next, index++)
@@ -14054,11 +14033,18 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * new_query,
 		      continue;
 		    }
 
-		  if ((old_select_node->node_type == PT_NAME || old_select_node->node_type == PT_DOT_)
-		      && (new_select_node->node_type == PT_NAME || new_select_node->node_type == PT_DOT_))
+		  type =
+		    referenced_node->node_type ==
+		    new_select_node->node_type ? referenced_node->node_type : PT_NODE_NONE;
+		  if (type == PT_NODE_NONE)
+		    {
+		      continue;
+		    }
+
+		  if (type == PT_NAME || type == PT_DOT_ || type == PT_EXPR || type == PT_VALUE)
 		    {
 
-		      if (pt_check_path_eq (parser, old_select_node, new_select_node) == 0)
+		      if (pt_check_path_eq (parser, referenced_node, new_select_node) == 0)
 			{
 			  /* name match */
 			  break;
@@ -14066,8 +14052,7 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * new_query,
 		    }
 		  else
 		    {
-		      /* brute method, compare printed trees */
-		      char *str_old = parser_print_tree (parser, old_select_node);
+		      char *str_old = parser_print_tree (parser, referenced_node);
 		      char *str_new = parser_print_tree (parser, new_select_node);
 
 		      if (pt_str_compare (str_old, str_new, CASE_INSENSITIVE) == 0)
@@ -14080,11 +14065,9 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * new_query,
 
 	      if (new_select_node == NULL)
 		{
-		  /* old_select_node was not found in select-list */
-		  old_select_node->flag.is_hidden_column = 1;
-		  parser_append_node (old_select_node, new_query->info.query.q.select.list);
-
-		  index = pt_length_of_list (new_query->info.query.q.select.list);
+		  /* referenced_node was not found in select-list */
+		  referenced_node->flag.is_hidden_column = 1;
+		  parser_append_node (referenced_node, new_query->info.query.q.select.list);
 		}
 
 	      value->info.value.data_value.i = index;
