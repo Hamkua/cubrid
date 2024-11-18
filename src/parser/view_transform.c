@@ -14041,25 +14041,10 @@ mq_update_analytic_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * new_query,
 		      continue;
 		    }
 
-		  if (type == PT_NAME || type == PT_DOT_ || type == PT_EXPR || type == PT_VALUE)
+		  if (pt_compare_sort_spec_expr (parser, referenced_node, new_select_node))
 		    {
-
-		      if (pt_check_path_eq (parser, referenced_node, new_select_node) == 0)
-			{
-			  /* name match */
-			  break;
-			}
-		    }
-		  else
-		    {
-		      char *str_old = parser_print_tree (parser, referenced_node);
-		      char *str_new = parser_print_tree (parser, new_select_node);
-
-		      if (pt_str_compare (str_old, str_new, CASE_INSENSITIVE) == 0)
-			{
-			  /* match */
-			  break;
-			}
+		      /* match */
+		      break;
 		    }
 		}
 
