@@ -15711,7 +15711,7 @@ pt_resolve_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * sort_spec, PT_NODE
 bool
 pt_compare_sort_spec_expr (PARSER_CONTEXT * parser, PT_NODE * expr1, PT_NODE * expr2)
 {
-  if (parser == NULL || expr1 == NULL || expr2 == NULL)
+  if (parser == NULL || expr1 == NULL || expr2 == NULL || (expr1->node_type != expr2->node_type))
     {
       return false;
     }
