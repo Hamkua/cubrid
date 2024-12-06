@@ -108,6 +108,7 @@ static void pruningset_set_all (PRUNING_BITSET *);
 static void pruningset_copy (PRUNING_BITSET *, const PRUNING_BITSET *);
 static void pruningset_add (PRUNING_BITSET *, int);
 static void pruningset_remove (PRUNING_BITSET *, int);
+static void pruningset_except (PRUNING_BITSET *, const PRUNING_BITSET *);
 static void pruningset_intersect (PRUNING_BITSET *, const PRUNING_BITSET *);
 static void pruningset_union (PRUNING_BITSET *, const PRUNING_BITSET *);
 static bool pruningset_is_set (const PRUNING_BITSET *, int);
@@ -137,6 +138,8 @@ static MATCH_STATUS partition_match_key_range (PRUNING_CONTEXT * pinfo, const KE
 					       PRUNING_BITSET * pruned);
 static bool partition_do_regu_variables_match (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left,
 					       const REGU_VARIABLE * right);
+static bool partition_do_regu_variables_contain (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left,
+						 const REGU_VARIABLE * right);
 static MATCH_STATUS partition_prune (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * arg, const PRUNING_OP op,
 				     PRUNING_BITSET * pruned);
 static MATCH_STATUS partition_prune_db_val (PRUNING_CONTEXT * pinfo, const DB_VALUE * val, const PRUNING_OP op,
@@ -167,6 +170,8 @@ static int partition_attrinfo_get_key (THREAD_ENTRY * thread_p, PRUNING_CONTEXT 
 /* misc pruning functions */
 static bool partition_decrement_value (DB_VALUE * val);
 
+static void partition_cache_dbvalp (REGU_VARIABLE * var, DB_VALUE * val);
+static bool partition_check_key_function (PRUNING_OP op, OPERATOR_TYPE opcode);
 
 /* PRUNING_BITSET manipulation functions */
 
@@ -235,6 +240,17 @@ static void
 pruningset_remove (PRUNING_BITSET * s, int i)
 {
   s->set[i / BITS_IN_WORD] &= ~(1 << (i % BITS_IN_WORD));
+}
+
+static void
+pruningset_except (PRUNING_BITSET * left, const PRUNING_BITSET * right)
+{
+  unsigned int i;
+
+  for (i = 0; i < BITSET_LENGTH (left); i++)
+    {
+      left->set[i] &= ~(right->set[i]);
+    }
 }
 
 /*
@@ -1668,6 +1684,14 @@ partition_is_reguvar_const (const REGU_VARIABLE * regu_var)
 	/* either all arguments are constants of this is an expression with no arguments */
 	return true;
       }
+    case TYPE_ATTR_ID:
+      {
+	if (regu_var->value.attr_descr.cache_dbvalp == NULL)
+	  {
+	    return false;
+	  }
+	return true;
+      }
     default:
       return false;
     }
@@ -1910,7 +1934,8 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 	    /* see if part_expr matches right or left */
 	    REGU_VARIABLE *left, *right;
 	    PRUNING_OP op;
-
+	    DB_VALUE val;
+	    bool is_value = false;
 	    left = pr->pe.m_eval_term.et.et_comp.lhs;
 	    right = pr->pe.m_eval_term.et.et_comp.rhs;
 	    op = partition_rel_op_to_pruning_op (pr->pe.m_eval_term.et.et_comp.rel_op);
@@ -1924,6 +1949,38 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 	      {
 		status = partition_prune (pinfo, left, op, pruned);
 	      }
+	    else if (partition_do_regu_variables_contain (pinfo, left, part_expr)
+		     && partition_check_key_function (op, part_expr->value.arithptr->opcode))
+	      {
+		if (partition_get_value_from_regu_var (pinfo, right, &val, &is_value) == NO_ERROR)
+		  {
+		    if (tp_value_cast (&val, part_expr->value.arithptr->value,
+				      part_expr->value.arithptr->domain, false) == DOMAIN_COMPATIBLE)
+		      {
+			partition_cache_dbvalp (part_expr, &val);
+			status = partition_prune (pinfo, part_expr, op, pruned);
+		      }
+		  }
+	      }
+	    else if (partition_do_regu_variables_contain (pinfo, right, part_expr)
+		     && partition_check_key_function (op, part_expr->value.arithptr->opcode))
+	      {
+
+		if (partition_get_value_from_regu_var (pinfo, right, &val, &is_value) == NO_ERROR)
+		  {
+		    if (tp_value_cast
+			(&val, part_expr->value.arithptr->value, part_expr->value.arithptr->domain,
+			 false) == DOMAIN_COMPATIBLE)
+		      {
+			partition_cache_dbvalp (part_expr, &val);
+			status = partition_prune (pinfo, part_expr, op, pruned);
+		      }
+		  }
+	      }
+
+	    partition_cache_dbvalp (part_expr, NULL);
+	    pr_clear_value (&val);
+
 	    break;
 	  }
 
@@ -1969,6 +2026,48 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
     }
 
   return status;
+}
+
+static bool
+partition_check_key_function (PRUNING_OP op, OPERATOR_TYPE opcode)
+{
+  switch (op)
+    {
+    case PO_LE:
+    case PO_LT:
+    case PO_GE:
+    case PO_GT:
+      switch (opcode)
+	{
+	case T_YEAR:
+	case T_TODAYS:
+	case T_UNIX_TIMESTAMP:
+	  return true;
+	default:
+	  return false;
+	}
+    default:
+      return true;
+    }
+}
+
+static bool
+partition_do_regu_variables_contain (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, const REGU_VARIABLE * right)
+{
+  if (left == NULL || right == NULL)
+    {
+      return left == right;
+    }
+
+  if (left->type == TYPE_ATTR_ID && right->type == TYPE_INARITH)
+    {
+      if (left->value.attr_descr.id == pinfo->attr_id)
+	{
+	  return true;
+	}
+    }
+
+  return false;
 }
 
 /*
@@ -2570,6 +2669,36 @@ partition_set_cache_info_for_expr (REGU_VARIABLE * var, ATTR_ID attr_id, HEAP_CA
 	break;
       }
 
+    default:
+      break;
+    }
+}
+
+static void
+partition_cache_dbvalp (REGU_VARIABLE * var, DB_VALUE * val)
+{
+  assert (var != NULL);
+  switch (var->type)
+    {
+    case TYPE_ATTR_ID:
+      var->value.attr_descr.cache_dbvalp = val;
+      break;
+
+    case TYPE_INARITH:
+      if (var->value.arithptr->leftptr != NULL)
+	{
+	  partition_cache_dbvalp (var->value.arithptr->leftptr, val);
+	}
+
+      if (var->value.arithptr->rightptr != NULL)
+	{
+	  partition_cache_dbvalp (var->value.arithptr->rightptr, val);
+	}
+
+      if (var->value.arithptr->thirdptr != NULL)
+	{
+	  partition_cache_dbvalp (var->value.arithptr->thirdptr, val);
+	}
     default:
       break;
     }
