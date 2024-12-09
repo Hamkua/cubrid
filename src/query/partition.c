@@ -2844,6 +2844,8 @@ partition_prune_spec (THREAD_ENTRY * thread_p, val_descr * vd, access_spec_node 
 {
   int error = NO_ERROR;
   PRUNING_CONTEXT pinfo;
+  PRUNING_BITSET pruned;
+  MATCH_STATUS status = MATCH_NOT_FOUND;
 
   if (spec == NULL)
     {
@@ -2887,45 +2889,41 @@ partition_prune_spec (THREAD_ENTRY * thread_p, val_descr * vd, access_spec_node 
   pinfo.spec = spec;
   pinfo.vd = vd;
 
-  if (spec->access == ACCESS_METHOD_SEQUENTIAL || spec->access == ACCESS_METHOD_SEQUENTIAL_RECORD_INFO
-      || spec->access == ACCESS_METHOD_SEQUENTIAL_PAGE_SCAN || spec->access == ACCESS_METHOD_SEQUENTIAL_SAMPLING_SCAN)
+  pruningset_init (&pruned, PARTITIONS_COUNT (&pinfo));
+  if (pinfo.spec->where_pred != NULL)
     {
-      error = partition_prune_heap_scan (&pinfo);
-      if (error != NO_ERROR)
+      status = partition_match_pred_expr (&pinfo, pinfo.spec->where_pred, &pruned);
+    }
+
+  if (pinfo.spec->where_key != NULL)
+    {
+      status = partition_match_pred_expr (&pinfo, pinfo.spec->where_key, &pruned);
+    }
+
+  if (pinfo.spec->where_range != NULL)
+    {
+      status = partition_match_pred_expr (&pinfo, pinfo.spec->where_range, &pruned);
+    }
+
+  if (status == MATCH_NOT_FOUND)
+    {
+      if (pinfo.error_code != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
+	}
+      else
+	{
+	  pruningset_set_all (&pruned);
+	  error = pruningset_to_spec_list (&pinfo, &pruned);
+	  if (error != NO_ERROR)
+	    {
+	      ASSERT_ERROR ();
+	    }
 	}
     }
   else
     {
-      if (spec->indexptr == NULL)
-	{
-	  assert (false);
-
-	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_GENERIC_ERROR, 0);
-	  partition_clear_pruning_context (&pinfo);
-	  return ER_FAILED;
-	}
-
-      if (pinfo.partition_pred->func_regu->type != TYPE_ATTR_ID)
-	{
-	  /* In the case of index keys, we will only apply pruning if the partition expression is actually an
-	   * attribute. This is because we will not have expressions in the index key, only attributes (except for
-	   * function and filter indexes which are not handled yet) */
-	  pinfo.attr_position = -1;
-	}
-      else
-	{
-	  BTID *btid = &spec->indexptr->btid;
-	  error = partition_get_position_in_key (&pinfo, btid);
-	  if (error != NO_ERROR)
-	    {
-	      ASSERT_ERROR ();
-	      partition_clear_pruning_context (&pinfo);
-	      return error;
-	    }
-	}
-      error = partition_prune_index_scan (&pinfo);
+      error = pruningset_to_spec_list (&pinfo, &pruned);
       if (error != NO_ERROR)
 	{
 	  ASSERT_ERROR ();
