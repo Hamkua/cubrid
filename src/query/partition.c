@@ -1925,6 +1925,8 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 	    left = pr->pe.m_eval_term.et.et_comp.lhs;
 	    right = pr->pe.m_eval_term.et.et_comp.rhs;
 	    op = partition_rel_op_to_pruning_op (pr->pe.m_eval_term.et.et_comp.rel_op);
+	    DB_VALUE val;
+	    bool is_value;
 
 	    status = MATCH_NOT_FOUND;
 	    if (partition_do_regu_variables_match (pinfo, left, part_expr))
@@ -1935,41 +1937,39 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 	      {
 		status = partition_prune (pinfo, left, op, pruned);
 	      }
-	    else if (partition_supports_pruning_op_for_function (op, part_expr->value.arithptr->opcode))
+
+	    else if (partition_do_regu_variables_contain (pinfo, left, part_expr))
 	      {
-		DB_VALUE val;
-		bool is_value;
-
-		if (partition_do_regu_variables_contain (pinfo, left, part_expr))
+		if (partition_supports_pruning_op_for_function (op, part_expr->value.arithptr->opcode)
+		    && partition_get_value_from_regu_var (pinfo, right, &val, &is_value) == NO_ERROR)
 		  {
-		    if (partition_get_value_from_regu_var (pinfo, right, &val, &is_value) == NO_ERROR)
+		    if (tp_value_cast
+			(&val, part_expr->value.arithptr->value, part_expr->value.arithptr->domain,
+			 false) == DOMAIN_COMPATIBLE)
 		      {
-			if (tp_value_cast
-			    (&val, part_expr->value.arithptr->value, part_expr->value.arithptr->domain,
-			     false) == DOMAIN_COMPATIBLE)
-			  {
-			    partition_cache_dbvalp (part_expr, &val);
-			    status = partition_prune (pinfo, part_expr, op, pruned);
-			  }
+			partition_cache_dbvalp (part_expr, &val);
+			status = partition_prune (pinfo, part_expr, op, pruned);
 		      }
 		  }
-		else if (partition_do_regu_variables_contain (pinfo, right, part_expr))
-		  {
-		    if (partition_get_value_from_regu_var (pinfo, left, &val, &is_value) == NO_ERROR)
-		      {
-			if (tp_value_cast
-			    (&val, part_expr->value.arithptr->value, part_expr->value.arithptr->domain,
-			     false) == DOMAIN_COMPATIBLE)
-			  {
-			    partition_cache_dbvalp (part_expr, &val);
-			    status = partition_prune (pinfo, part_expr, op, pruned);
-			  }
-		      }
-		  }
-
-		partition_cache_dbvalp (part_expr, NULL);
-		pr_clear_value (&val);
 	      }
+	    else if (partition_do_regu_variables_contain (pinfo, right, part_expr))
+	      {
+		if (partition_supports_pruning_op_for_function (op, part_expr->value.arithptr->opcode)
+		    && partition_get_value_from_regu_var (pinfo, left, &val, &is_value) == NO_ERROR)
+		  {
+		    if (tp_value_cast
+			(&val, part_expr->value.arithptr->value, part_expr->value.arithptr->domain,
+			 false) == DOMAIN_COMPATIBLE)
+		      {
+			partition_cache_dbvalp (part_expr, &val);
+			status = partition_prune (pinfo, part_expr, op, pruned);
+		      }
+		  }
+	      }
+
+	    partition_cache_dbvalp (part_expr, NULL);
+	    pr_clear_value (&val);
+
 	    break;
 	  }
 
