@@ -2017,11 +2017,12 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 
 	  if (dom_status != DOMAIN_COMPATIBLE)
 	    {
-	      (void) tp_domain_status_er_set (dom_status, ARG_FILE_LINE, val, left->domain);
+	      (void) tp_domain_status_er_set (dom_status, ARG_FILE_LINE, &val, left->domain);
 
 	      pinfo->error_code = ER_FAILED;
+	      pr_clear_value (&val);
+	      pr_clear_value (&casted_val);
 	      return MATCH_NOT_FOUND;
-
 	    }
 
 	  partition_cache_dbvalp (part_expr, &casted_val);
