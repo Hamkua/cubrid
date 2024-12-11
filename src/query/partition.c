@@ -1976,9 +1976,12 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 	      {
 		status = partition_prune (pinfo, list, op, pruned);
 	      }
-	    else if (partition_do_regu_variables_contain (pinfo, regu, part_expr))
+	    else if (partition_supports_pruning_op_for_function (op, part_expr))
 	      {
-		status = partition_prune_arith (pinfo, regu, list, part_expr, op, pruned);
+		if (partition_do_regu_variables_contain (pinfo, regu, part_expr))
+		  {
+		    status = partition_prune_arith (pinfo, regu, list, part_expr, op, pruned);
+		  }
 	      }
 	  }
 	  break;
