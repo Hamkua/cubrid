@@ -170,7 +170,10 @@ static int partition_attrinfo_get_key (THREAD_ENTRY * thread_p, PRUNING_CONTEXT 
 static bool partition_decrement_value (DB_VALUE * val);
 
 static void partition_cache_dbvalp (REGU_VARIABLE * var, DB_VALUE * val);
-static bool partition_supports_pruning_op_for_function (const PRUNING_OP op, const OPERATOR_TYPE opcode);
+static bool partition_supports_pruning_op_for_function (const PRUNING_OP op, const REGU_VARIABLE * part_expr);
+static MATCH_STATUS partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left,
+					   const REGU_VARIABLE * right, REGU_VARIABLE * part_expr, const PRUNING_OP op,
+					   PRUNING_BITSET * pruned);
 
 /* PRUNING_BITSET manipulation functions */
 
@@ -1925,8 +1928,6 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 	    left = pr->pe.m_eval_term.et.et_comp.lhs;
 	    right = pr->pe.m_eval_term.et.et_comp.rhs;
 	    op = partition_rel_op_to_pruning_op (pr->pe.m_eval_term.et.et_comp.rel_op);
-	    DB_VALUE val, casted_val;
-	    bool is_value;
 
 	    status = MATCH_NOT_FOUND;
 	    if (partition_do_regu_variables_match (pinfo, left, part_expr))
@@ -1937,35 +1938,17 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 	      {
 		status = partition_prune (pinfo, left, op, pruned);
 	      }
-	    else if (partition_do_regu_variables_contain (pinfo, left, part_expr))
+	    else if (partition_supports_pruning_op_for_function (op, part_expr))
 	      {
-		if (partition_supports_pruning_op_for_function (op, part_expr->value.arithptr->opcode)
-		    && partition_get_value_from_regu_var (pinfo, right, &val, &is_value) == NO_ERROR)
+		if (partition_do_regu_variables_contain (pinfo, left, part_expr))
 		  {
-		    if (tp_value_cast (&val, &casted_val, left->domain, false) == DOMAIN_COMPATIBLE)
-		      {
-			partition_cache_dbvalp (part_expr, &casted_val);
-			status = partition_prune (pinfo, part_expr, op, pruned);
-		      }
+		    status = partition_prune_arith (pinfo, left, right, part_expr, op, pruned);
+		  }
+		else if (partition_do_regu_variables_contain (pinfo, right, part_expr))
+		  {
+		    status = partition_prune_arith (pinfo, right, left, part_expr, op, pruned);
 		  }
 	      }
-	    else if (partition_do_regu_variables_contain (pinfo, right, part_expr))
-	      {
-		if (partition_supports_pruning_op_for_function (op, part_expr->value.arithptr->opcode)
-		    && partition_get_value_from_regu_var (pinfo, left, &val, &is_value) == NO_ERROR)
-		  {
-		    if (tp_value_cast (&val, &casted_val, right->domain, false) == DOMAIN_COMPATIBLE)
-		      {
-			partition_cache_dbvalp (part_expr, &val);
-			status = partition_prune (pinfo, part_expr, op, pruned);
-		      }
-		  }
-	      }
-
-	    partition_cache_dbvalp (part_expr, NULL);
-	    pr_clear_value (&val);
-	    pr_clear_value (&casted_val);
-
 	    break;
 	  }
 
@@ -1993,6 +1976,10 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 	      {
 		status = partition_prune (pinfo, list, op, pruned);
 	      }
+	    else if (partition_do_regu_variables_contain (pinfo, regu, part_expr))
+	      {
+		status = partition_prune_arith (pinfo, regu, list, part_expr, op, pruned);
+	      }
 	  }
 	  break;
 
@@ -2013,15 +2000,64 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
   return status;
 }
 
-static bool
-partition_supports_pruning_op_for_function (const PRUNING_OP op, const OPERATOR_TYPE opcode)
+static MATCH_STATUS
+partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, const REGU_VARIABLE * right,
+		       REGU_VARIABLE * part_expr, const PRUNING_OP op, PRUNING_BITSET * pruned)
 {
+  MATCH_STATUS status = MATCH_NOT_FOUND;
+  DB_VALUE val, casted_val;
+  TP_DOMAIN_STATUS dom_status;
+  bool is_value;
+
+  if (partition_get_value_from_regu_var (pinfo, right, &val, &is_value) == NO_ERROR)
+    {
+      if (TP_DOMAIN_TYPE (left->domain) != DB_VALUE_TYPE (&val))
+	{
+	  dom_status = tp_value_cast (&val, &casted_val, left->domain, false);
+
+	  if (dom_status != DOMAIN_COMPATIBLE)
+	    {
+	      (void) tp_domain_status_er_set (dom_status, ARG_FILE_LINE, val, left->domain);
+
+	      pinfo->error_code = ER_FAILED;
+	      return MATCH_NOT_FOUND;
+
+	    }
+
+	  partition_cache_dbvalp (part_expr, &casted_val);
+	}
+      else
+	{
+	  partition_cache_dbvalp (part_expr, &val);
+	}
+
+      status = partition_prune (pinfo, part_expr, op, pruned);
+      partition_cache_dbvalp (part_expr, NULL);
+    }
+  pr_clear_value (&val);
+  pr_clear_value (&casted_val);
+
+  return status;
+}
+
+static bool
+partition_supports_pruning_op_for_function (const PRUNING_OP op, const REGU_VARIABLE * part_expr)
+{
+  OPERATOR_TYPE opcode;
+
+  if (part_expr->type != TYPE_INARITH)
+    {
+      return false;
+    }
+
+  opcode = part_expr->value.arithptr->opcode;
+
   switch (op)
     {
-    case PO_LE:
     case PO_LT:
-    case PO_GE:
+    case PO_LE:
     case PO_GT:
+    case PO_GE:
       switch (opcode)
 	{
 	case T_YEAR:
@@ -2031,9 +2067,16 @@ partition_supports_pruning_op_for_function (const PRUNING_OP op, const OPERATOR_
 	default:
 	  return false;
 	}
-    default:
+    case PO_EQ:
+    case PO_NE:
+    case PO_IN:
+    case PO_NOT_IN:
+    case PO_IS_NULL:
       return true;
+    default:
+      return false;
     }
+
 }
 
 static bool
