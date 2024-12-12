@@ -2014,33 +2014,89 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 
   if (partition_get_value_from_regu_var (pinfo, right, &val, &is_value) == NO_ERROR)
     {
-      if (TP_DOMAIN_TYPE (left->domain) != DB_VALUE_TYPE (&val))
+      DB_COLLECTION *collection = NULL;
+      DB_VALUE collection_val;
+      DB_VALUE part_expr_val;
+
+      int size = 0;
+      if (db_value_type_is_collection (&val))
 	{
-	  dom_status = tp_value_cast (&val, &casted_val, left->domain, false);
+	  DB_VALUE *new_collection_dbval = NULL;
+	  DB_COLLECTION *new_collection = NULL;
+	  collection = db_get_collection (&val);
+	  size = db_set_size (collection);
+	  new_collection = db_seq_create (NULL, NULL, size);
 
-	  if (dom_status != DOMAIN_COMPATIBLE)
+	  for (int i = 0; i < size; i++)
 	    {
-	      (void) tp_domain_status_er_set (dom_status, ARG_FILE_LINE, &val, left->domain);
+	      db_set_get (collection, i, &collection_val);
 
-	      pinfo->error_code = ER_FAILED;
-	      pr_clear_value (&val);
-	      pr_clear_value (&casted_val);
-	      return MATCH_NOT_FOUND;
+	      if (TP_DOMAIN_TYPE (left->domain) != DB_VALUE_TYPE (&collection_val))
+		{
+		  dom_status = tp_value_cast (&collection_val, &casted_val, left->domain, false);
+
+		  if (dom_status != DOMAIN_COMPATIBLE)
+		    {
+		      (void) tp_domain_status_er_set (dom_status, ARG_FILE_LINE, &collection_val, left->domain);
+
+		      pinfo->error_code = ER_FAILED;
+		      pr_clear_value (&val);
+		      pr_clear_value (&collection_val);
+		      pr_clear_value (&casted_val);
+		      return MATCH_NOT_FOUND;
+		    }
+
+		  partition_cache_dbvalp (part_expr, &casted_val);
+		}
+	      else
+		{
+		  partition_cache_dbvalp (part_expr, &collection_val);
+		}
+
+	      if (partition_get_value_from_regu_var (pinfo, part_expr, &part_expr_val, &is_value) == NO_ERROR)
+		{
+		  db_set_add (new_collection, &part_expr_val);
+		}
+
 	    }
 
-	  partition_cache_dbvalp (part_expr, &casted_val);
+	  new_collection_dbval = db_value_copy (&val);
+	  new_collection_dbval->data.set = new_collection;
+
+	  status = partition_prune_db_val (pinfo, new_collection_dbval, op, pruned);
+	  pr_clear_value (&part_expr_val);
+	  pr_clear_value (new_collection_dbval);
 	}
       else
 	{
-	  partition_cache_dbvalp (part_expr, &val);
+	  if (TP_DOMAIN_TYPE (left->domain) != DB_VALUE_TYPE (&val))
+	    {
+	      dom_status = tp_value_cast (&val, &casted_val, left->domain, false);
+
+	      if (dom_status != DOMAIN_COMPATIBLE)
+		{
+		  (void) tp_domain_status_er_set (dom_status, ARG_FILE_LINE, &val, left->domain);
+
+		  pinfo->error_code = ER_FAILED;
+		  pr_clear_value (&val);
+		  pr_clear_value (&casted_val);
+		  return MATCH_NOT_FOUND;
+		}
+
+	      partition_cache_dbvalp (part_expr, &casted_val);
+	    }
+	  else
+	    {
+	      partition_cache_dbvalp (part_expr, &val);
+	    }
 	}
 
       status = partition_prune (pinfo, part_expr, op, pruned);
       partition_cache_dbvalp (part_expr, NULL);
-    }
-  pr_clear_value (&val);
-  pr_clear_value (&casted_val);
 
+      pr_clear_value (&val);
+      pr_clear_value (&casted_val);
+    }
   return status;
 }
 
