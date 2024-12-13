@@ -2009,63 +2009,76 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 {
   MATCH_STATUS status = MATCH_NOT_FOUND;
   DB_VALUE val, casted_val;
+  DB_COLLECTION *collection = NULL;
+  DB_COLLECTION *new_collection = NULL;
+  DB_VALUE old_collection_val, new_collection_val, part_key_val;
   TP_DOMAIN_STATUS dom_status;
   bool is_value;
 
+  db_make_null (&val);
+  db_make_null (&casted_val);
+  db_make_null (&old_collection_val);
+  db_make_null (&new_collection_val);
+  db_make_null (&part_key_val);
+
   if (partition_get_value_from_regu_var (pinfo, right, &val, &is_value) == NO_ERROR)
     {
-      DB_COLLECTION *collection = NULL;
-      DB_VALUE collection_val;
-      DB_VALUE part_expr_val;
-
       int size = 0;
+
       if (db_value_type_is_collection (&val))
 	{
-	  DB_VALUE *new_collection_dbval = NULL;
-	  DB_COLLECTION *new_collection = NULL;
 	  collection = db_get_collection (&val);
-	  size = db_set_size (collection);
-	  new_collection = db_seq_create (NULL, NULL, size);
+	  new_collection = db_col_copy (collection);
+	  //   new_collection = db_col_create (type, size, NULL);
 
+	  if (new_collection == NULL)
+	    {
+	      goto cleanup;
+	    }
+
+	  size = db_col_size (collection);
 	  for (int i = 0; i < size; i++)
 	    {
-	      db_set_get (collection, i, &collection_val);
-
-	      if (TP_DOMAIN_TYPE (left->domain) != DB_VALUE_TYPE (&collection_val))
+	      if (db_col_get (collection, i, &old_collection_val) != NO_ERROR)
 		{
-		  dom_status = tp_value_cast (&collection_val, &casted_val, left->domain, false);
+		  goto cleanup;
+		}
+
+	      if (TP_DOMAIN_TYPE (left->domain) != DB_VALUE_TYPE (&old_collection_val))
+		{
+		  dom_status = tp_value_cast (&old_collection_val, &casted_val, left->domain, false);
 
 		  if (dom_status != DOMAIN_COMPATIBLE)
 		    {
-		      (void) tp_domain_status_er_set (dom_status, ARG_FILE_LINE, &collection_val, left->domain);
+		      (void) tp_domain_status_er_set (dom_status, ARG_FILE_LINE, &old_collection_val, left->domain);
 
 		      pinfo->error_code = ER_FAILED;
-		      pr_clear_value (&val);
-		      pr_clear_value (&collection_val);
-		      pr_clear_value (&casted_val);
-		      return MATCH_NOT_FOUND;
+		      goto cleanup;
 		    }
 
+		  // TODO: need to inspect collection's data type
 		  partition_cache_dbvalp (part_expr, &casted_val);
 		}
 	      else
 		{
-		  partition_cache_dbvalp (part_expr, &collection_val);
+		  partition_cache_dbvalp (part_expr, &old_collection_val);
 		}
 
-	      if (partition_get_value_from_regu_var (pinfo, part_expr, &part_expr_val, &is_value) == NO_ERROR)
+	      if (partition_get_value_from_regu_var (pinfo, part_expr, &part_key_val, &is_value) == NO_ERROR)
 		{
-		  db_set_add (new_collection, &part_expr_val);
+		  if (is_value)
+		    {
+		      db_col_put (new_collection, i, &part_key_val);
+		    }
 		}
-
 	    }
 
-	  new_collection_dbval = db_value_copy (&val);
-	  new_collection_dbval->data.set = new_collection;
+	  if (db_make_collection (&new_collection_val, new_collection) != NO_ERROR)
+	    {
+	      goto cleanup;
+	    }
 
-	  status = partition_prune_db_val (pinfo, new_collection_dbval, op, pruned);
-	  pr_clear_value (&part_expr_val);
-	  pr_clear_value (new_collection_dbval);
+	  status = partition_prune_db_val (pinfo, &new_collection_val, op, pruned);
 	}
       else
 	{
@@ -2078,9 +2091,7 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 		  (void) tp_domain_status_er_set (dom_status, ARG_FILE_LINE, &val, left->domain);
 
 		  pinfo->error_code = ER_FAILED;
-		  pr_clear_value (&val);
-		  pr_clear_value (&casted_val);
-		  return MATCH_NOT_FOUND;
+		  goto cleanup;
 		}
 
 	      partition_cache_dbvalp (part_expr, &casted_val);
@@ -2092,11 +2103,20 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 	}
 
       status = partition_prune (pinfo, part_expr, op, pruned);
-      partition_cache_dbvalp (part_expr, NULL);
-
-      pr_clear_value (&val);
-      pr_clear_value (&casted_val);
     }
+
+cleanup:
+  partition_cache_dbvalp (part_expr, NULL);
+  if (new_collection != NULL)
+    {
+      db_col_free (new_collection);
+    }
+  pr_clear_value (&old_collection_val);
+  pr_clear_value (&new_collection_val);
+  pr_clear_value (&part_key_val);
+  pr_clear_value (&casted_val);
+  pr_clear_value (&val);
+
   return status;
 }
 
