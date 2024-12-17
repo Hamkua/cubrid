@@ -1517,6 +1517,7 @@ static MATCH_STATUS
 partition_prune (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * arg, const PRUNING_OP op, PRUNING_BITSET * pruned)
 {
   MATCH_STATUS status = MATCH_NOT_FOUND;
+  PRUNING_BITSET new_pruned;
   DB_VALUE val;
   bool is_value = false;
 
@@ -1543,7 +1544,19 @@ partition_prune (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * arg, const PRUNI
       return MATCH_NOT_FOUND;
     }
 
-  status = partition_prune_db_val (pinfo, &val, op, pruned);
+  if (pruningset_popcount (pruned) != 0)
+    {
+      pruningset_init (&new_pruned, PARTITIONS_COUNT (pinfo));
+      status = partition_prune_db_val (pinfo, &val, op, &new_pruned);
+      if (status == MATCH_OK)
+	{
+	  pruningset_intersect (pruned, &new_pruned);
+	}
+    }
+  else
+    {
+      status = partition_prune_db_val (pinfo, &val, op, pruned);
+    }
 
   pr_clear_value (&val);
 
