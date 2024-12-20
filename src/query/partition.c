@@ -1346,6 +1346,55 @@ partition_prune_range (PRUNING_CONTEXT * pinfo, const DB_VALUE * val, const PRUN
   int rmin = DB_UNK, rmax = DB_UNK;
   MATCH_STATUS status;
 
+  if (db_value_type_is_collection (val))
+    {
+      PRUNING_BITSET new_pruned;
+      DB_COLLECTION *values = NULL;
+      DB_VALUE col;
+      int size, j;
+
+      values = db_get_set (val);
+      size = db_set_size (values);
+      if (size < 0)
+	{
+	  pinfo->error_code = ER_FAILED;
+	  status = MATCH_NOT_FOUND;
+	  goto cleanup;
+	}
+
+      for (j = 0; j < size; j++)
+	{
+	  if (db_set_get (values, j, &col) != NO_ERROR)
+	    {
+	      pinfo->error_code = ER_FAILED;
+	      status = MATCH_NOT_FOUND;
+	      goto cleanup;
+	    }
+
+	  pruningset_init (&new_pruned, PARTITIONS_COUNT (pinfo));
+	  status = partition_prune_range (pinfo, &col, op, &new_pruned);
+	  if (j > 0)
+	    {
+	      if (op == PO_EQ)
+		{
+		  pruningset_intersect (pruned, &new_pruned);
+		}
+	      else
+		{
+		  pruningset_union (pruned, &new_pruned);
+		}
+	    }
+	  else
+	    {
+	      pruningset_copy (pruned, &new_pruned);
+	    }
+
+	  pr_clear_value (&col);
+	}
+
+      goto cleanup;
+    }
+
   db_make_null (&min);
   db_make_null (&max);
 
@@ -1401,6 +1450,7 @@ partition_prune_range (PRUNING_CONTEXT * pinfo, const DB_VALUE * val, const PRUN
       status = MATCH_OK;
       switch (op)
 	{
+	case PO_IN:
 	case PO_EQ:
 	  /* Filter is part_expr = value. Find the *only* partition for which min <= value < max */
 	  if ((rmin == DB_EQ || rmin == DB_LT) && rmax == DB_LT)
