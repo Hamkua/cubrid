@@ -1552,6 +1552,13 @@ partition_prune (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * arg, const PRUNI
 	{
 	  pruningset_intersect (pruned, &new_pruned);
 	}
+      else
+	{
+	  if (pinfo->error_code == NO_ERROR)
+	    {
+	      status = MATCH_OK;
+	    }
+	}
     }
   else
     {
