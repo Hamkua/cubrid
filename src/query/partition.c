@@ -35,6 +35,7 @@
 #include "xasl.h"
 #include "xasl_predicate.hpp"
 #include "xasl_unpack_info.hpp"
+#include "set_object.h"
 // XXX: SHOULD BE THE LAST INCLUDE HEADER
 #include "memory_wrapper.hpp"
 
@@ -1975,12 +1976,50 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 	    /* see if part_expr matches right or left */
 	    REGU_VARIABLE *left, *right;
 	    PRUNING_OP op;
+	    REGU_VARIABLE *seq_var;
+	    REGU_VARIABLE_LIST seq_list;
+
 	    left = pr->pe.m_eval_term.et.et_comp.lhs;
 	    right = pr->pe.m_eval_term.et.et_comp.rhs;
 	    op = partition_rel_op_to_pruning_op (pr->pe.m_eval_term.et.et_comp.rel_op);
 
 	    status = MATCH_NOT_FOUND;
-	    if (partition_do_regu_variables_match (pinfo, left, part_expr))
+
+	    /* TODO: This is a temporary implementation for sequence handling. */
+	    if ((left->type == TYPE_FUNC || right->type == TYPE_FUNC) && part_expr->type == TYPE_ATTR_ID)
+	      {
+		if ((left->type == TYPE_FUNC && left->value.funcp->ftype == F_SEQUENCE) ||
+		    (right->type == TYPE_FUNC && right->value.funcp->ftype == F_SEQUENCE))
+		  {
+		    seq_var = (left->type == TYPE_FUNC) ? left : right;
+		    seq_list = seq_var->value.funcp->operand;
+		    int i = 0;
+
+		    while (seq_list != NULL)
+		      {
+			// TODO: Need to verify if the value is constant
+			seq_var = &seq_list->value;
+			if (seq_var->value.attr_descr.id == part_expr->value.attr_descr.id)
+			  {
+			    break;
+			  }
+			i++;
+			seq_list = seq_list->next;
+		      }
+
+		    if (seq_list == NULL)
+		      {
+			/* Attribute not found in sequence */
+			// pinfo->error_code = ER_FAILED;
+			status = MATCH_NOT_FOUND;
+			break;
+		      }
+
+		    DB_VALUE *val = (left->type == TYPE_FUNC) ? &right->value.dbval : &left->value.dbval;
+		    status = partition_prune_db_val (pinfo, val->data.set->set->array[i], op, pruned);
+		  }
+	      }
+	    else if (partition_do_regu_variables_match (pinfo, left, part_expr))
 	      {
 		status = partition_prune (pinfo, right, op, pruned);
 	      }
