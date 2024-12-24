@@ -1517,7 +1517,6 @@ static MATCH_STATUS
 partition_prune (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * arg, const PRUNING_OP op, PRUNING_BITSET * pruned)
 {
   MATCH_STATUS status = MATCH_NOT_FOUND;
-  PRUNING_BITSET new_pruned;
   DB_VALUE val;
   bool is_value = false;
 
@@ -1544,26 +1543,7 @@ partition_prune (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * arg, const PRUNI
       return MATCH_NOT_FOUND;
     }
 
-  if (pruningset_popcount (pruned) != 0)
-    {
-      pruningset_init (&new_pruned, PARTITIONS_COUNT (pinfo));
-      status = partition_prune_db_val (pinfo, &val, op, &new_pruned);
-      if (status == MATCH_OK)
-	{
-	  pruningset_intersect (pruned, &new_pruned);
-	}
-      else
-	{
-	  if (pinfo->error_code == NO_ERROR)
-	    {
-	      status = MATCH_OK;
-	    }
-	}
-    }
-  else
-    {
-      status = partition_prune_db_val (pinfo, &val, op, pruned);
-    }
+  status = partition_prune_db_val (pinfo, &val, op, pruned);
 
   pr_clear_value (&val);
 
@@ -2865,7 +2845,7 @@ partition_prune_spec (THREAD_ENTRY * thread_p, val_descr * vd, access_spec_node 
 {
   int error = NO_ERROR;
   PRUNING_CONTEXT pinfo;
-  PRUNING_BITSET pruned;
+  PRUNING_BITSET pruned, pruned_pred, pruned_key, pruned_range;
   MATCH_STATUS status = MATCH_NOT_FOUND;
 
   if (spec == NULL)
@@ -2911,49 +2891,74 @@ partition_prune_spec (THREAD_ENTRY * thread_p, val_descr * vd, access_spec_node 
   pinfo.vd = vd;
 
   pruningset_init (&pruned, PARTITIONS_COUNT (&pinfo));
+  pruningset_set_all (&pruned);
+
   if (pinfo.spec->where_pred != NULL)
     {
-      status = partition_match_pred_expr (&pinfo, pinfo.spec->where_pred, &pruned);
+      pruningset_init (&pruned_pred, PARTITIONS_COUNT (&pinfo));
+
+      status = partition_match_pred_expr (&pinfo, pinfo.spec->where_pred, &pruned_pred);
+      if (status == MATCH_NOT_FOUND)
+	{
+	  if (pinfo.error_code != NO_ERROR)
+	    {
+	      ASSERT_ERROR ();
+	      error = pinfo.error_code;
+	      goto error_exit;
+	    }
+	}
+      else
+	{
+	  pruningset_intersect (&pruned, &pruned_pred);
+	}
     }
 
   if (pinfo.spec->where_key != NULL)
     {
-      status = partition_match_pred_expr (&pinfo, pinfo.spec->where_key, &pruned);
+      pruningset_init (&pruned_key, PARTITIONS_COUNT (&pinfo));
+
+      status = partition_match_pred_expr (&pinfo, pinfo.spec->where_key, &pruned_key);
+      if (status == MATCH_NOT_FOUND)
+	{
+	  if (pinfo.error_code != NO_ERROR)
+	    {
+	      ASSERT_ERROR ();
+	      error = pinfo.error_code;
+	      goto error_exit;
+	    }
+	}
+      else
+	{
+	  pruningset_intersect (&pruned, &pruned_key);
+	}
     }
 
   if (pinfo.spec->where_range != NULL)
     {
-      status = partition_match_pred_expr (&pinfo, pinfo.spec->where_range, &pruned);
-    }
-
-  if (status == MATCH_NOT_FOUND)
-    {
-      if (pinfo.error_code != NO_ERROR)
+      pruningset_init (&pruned_range, PARTITIONS_COUNT (&pinfo));
+      status = partition_match_pred_expr (&pinfo, pinfo.spec->where_range, &pruned_range);
+      if (status == MATCH_NOT_FOUND)
 	{
-	  ASSERT_ERROR ();
+	  if (pinfo.error_code != NO_ERROR)
+	    {
+	      ASSERT_ERROR ();
+	      error = pinfo.error_code;
+	      goto error_exit;
+	    }
 	}
       else
 	{
-	  pruningset_set_all (&pruned);
-	  error = pruningset_to_spec_list (&pinfo, &pruned);
-	  if (error != NO_ERROR)
-	    {
-	      ASSERT_ERROR ();
-	    }
+	  pruningset_intersect (&pruned, &pruned_range);
 	}
+    }
+
+  error = pruningset_to_spec_list (&pinfo, &pruned);
+  if (error != NO_ERROR)
+    {
+      ASSERT_ERROR ();
+      goto error_exit;
     }
   else
-    {
-      error = pruningset_to_spec_list (&pinfo, &pruned);
-      if (error != NO_ERROR)
-	{
-	  ASSERT_ERROR ();
-	}
-    }
-
-  partition_clear_pruning_context (&pinfo);
-
-  if (error == NO_ERROR)
     {
       spec->pruned = true;
     }
@@ -2967,6 +2972,9 @@ partition_prune_spec (THREAD_ENTRY * thread_p, val_descr * vd, access_spec_node 
 	  memset (&curr_part->scan_stats, 0, sizeof (SCAN_STATS));
 	}
     }
+
+error_exit:
+  partition_clear_pruning_context (&pinfo);
 
   return error;
 }
