@@ -2217,15 +2217,49 @@ partition_do_regu_variables_contain (PRUNING_CONTEXT * pinfo, const REGU_VARIABL
       return left == right;
     }
 
-  if (left->type == TYPE_ATTR_ID && right->type == TYPE_INARITH)
+  if (left->type != TYPE_ATTR_ID)
     {
-      if (left->value.attr_descr.id == pinfo->attr_id)
+      return false;
+    }
+
+  switch (right->type)
+    {
+    case TYPE_ATTR_ID:
+      if (left->value.attr_descr.id == right->value.attr_descr.id)
 	{
 	  return true;
 	}
-    }
+      else
+	{
+	  return false;
+	}
+    case TYPE_INARITH:
+      if (right->value.arithptr->leftptr != NULL)
+	{
+	  if (partition_do_regu_variables_contain (pinfo, left, right->value.arithptr->leftptr))
+	    {
+	      return true;
+	    }
+	}
+      if (right->value.arithptr->rightptr != NULL)
+	{
+	  if (partition_do_regu_variables_contain (pinfo, left, right->value.arithptr->rightptr))
+	    {
+	      return true;
+	    }
+	}
+      if (right->value.arithptr->thirdptr != NULL)
+	{
+	  if (partition_do_regu_variables_contain (pinfo, left, right->value.arithptr->thirdptr))
+	    {
+	      return true;
+	    }
+	}
+      return false;
 
-  return false;
+    default:
+      return false;
+    }
 }
 
 /*
