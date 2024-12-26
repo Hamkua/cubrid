@@ -2890,9 +2890,12 @@ partition_prune_spec (THREAD_ENTRY * thread_p, val_descr * vd, access_spec_node 
   pinfo.spec = spec;
   pinfo.vd = vd;
 
+  /* set all bits of pruned to 1 */
   pruningset_init (&pruned, PARTITIONS_COUNT (&pinfo));
   pruningset_set_all (&pruned);
 
+  /* set bits matching pred_expr condition to 1 and intersect with pruned
+   * if no partitions match pred_expr condition, skip intersection */
   if (pinfo.spec->where_pred != NULL)
     {
       pruningset_init (&pruned_pred, PARTITIONS_COUNT (&pinfo));
