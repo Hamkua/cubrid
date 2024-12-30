@@ -2067,29 +2067,26 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 
   db_make_null (&val);
   db_make_null (&casted_val);
-  db_make_null (&old_collection_val);
-  db_make_null (&new_collection_val);
-  db_make_null (&part_key_val);
 
   if (partition_get_value_from_regu_var (pinfo, right, &val, &is_value) == NO_ERROR)
     {
-      int size = 0;
-
       if (db_value_type_is_collection (&val))
 	{
 	  collection = db_get_collection (&val);
 	  new_collection = db_col_copy (collection);
-	  //   new_collection = db_col_create (type, size, NULL);
 
 	  if (new_collection == NULL)
 	    {
 	      goto cleanup;
 	    }
 
-	  size = db_col_size (collection);
+	  int size = db_col_size (new_collection);
 	  for (int i = 0; i < size; i++)
 	    {
-	      if (db_col_get (collection, i, &old_collection_val) != NO_ERROR)
+	      db_make_null (&part_key_val);
+	      db_make_null (&old_collection_val);
+
+	      if (db_col_get (new_collection, i, &old_collection_val) != NO_ERROR)
 		{
 		  goto cleanup;
 		}
@@ -2106,7 +2103,6 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 		      goto cleanup;
 		    }
 
-		  // TODO: need to inspect collection's data type
 		  partition_cache_dbvalp (part_expr, &casted_val);
 		}
 	      else
@@ -2120,9 +2116,16 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 		    {
 		      db_col_put (new_collection, i, &part_key_val);
 		    }
+		  else
+		    {
+		      goto cleanup;
+		    }
 		}
+	      pr_clear_value (&part_key_val);
+	      pr_clear_value (&old_collection_val);
 	    }
 
+	  db_make_null (&new_collection_val);
 	  if (db_make_collection (&new_collection_val, new_collection) != NO_ERROR)
 	    {
 	      goto cleanup;
@@ -2150,9 +2153,9 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 	    {
 	      partition_cache_dbvalp (part_expr, &val);
 	    }
-	}
 
-      status = partition_prune (pinfo, part_expr, op, pruned);
+	  status = partition_prune (pinfo, part_expr, op, pruned);
+	}
     }
 
 cleanup:
