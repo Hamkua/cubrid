@@ -2065,9 +2065,6 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
   TP_DOMAIN_STATUS dom_status;
   bool is_value;
 
-  db_make_null (&val);
-  db_make_null (&casted_val);
-
   if (partition_get_value_from_regu_var (pinfo, right, &val, &is_value) == NO_ERROR)
     {
       if (db_value_type_is_collection (&val))
@@ -2081,10 +2078,11 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 	    }
 
 	  int size = db_col_size (new_collection);
+
 	  for (int i = 0; i < size; i++)
 	    {
-	      db_make_null (&part_key_val);
-	      db_make_null (&old_collection_val);
+	      pr_clear_value (&part_key_val);
+	      pr_clear_value (&old_collection_val);
 
 	      if (db_col_get (new_collection, i, &old_collection_val) != NO_ERROR)
 		{
@@ -2121,11 +2119,8 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 		      goto cleanup;
 		    }
 		}
-	      pr_clear_value (&part_key_val);
-	      pr_clear_value (&old_collection_val);
 	    }
 
-	  db_make_null (&new_collection_val);
 	  if (db_make_collection (&new_collection_val, new_collection) != NO_ERROR)
 	    {
 	      goto cleanup;
@@ -2160,10 +2155,6 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 
 cleanup:
   partition_cache_dbvalp (part_expr, NULL);
-  if (new_collection != NULL)
-    {
-      db_col_free (new_collection);
-    }
   pr_clear_value (&old_collection_val);
   pr_clear_value (&new_collection_val);
   pr_clear_value (&part_key_val);
@@ -2872,7 +2863,11 @@ partition_set_cache_info_for_expr (REGU_VARIABLE * var, ATTR_ID attr_id, HEAP_CA
 static void
 partition_cache_dbvalp (REGU_VARIABLE * var, DB_VALUE * val)
 {
-  assert (var != NULL);
+  if (var == NULL)
+    {
+      return;
+    }
+
   switch (var->type)
     {
     case TYPE_ATTR_ID:
@@ -2880,20 +2875,10 @@ partition_cache_dbvalp (REGU_VARIABLE * var, DB_VALUE * val)
       break;
 
     case TYPE_INARITH:
-      if (var->value.arithptr->leftptr != NULL)
-	{
-	  partition_cache_dbvalp (var->value.arithptr->leftptr, val);
-	}
+      (void) partition_cache_dbvalp (var->value.arithptr->leftptr, val);
+      (void) partition_cache_dbvalp (var->value.arithptr->rightptr, val);
+      (void) partition_cache_dbvalp (var->value.arithptr->thirdptr, val);
 
-      if (var->value.arithptr->rightptr != NULL)
-	{
-	  partition_cache_dbvalp (var->value.arithptr->rightptr, val);
-	}
-
-      if (var->value.arithptr->thirdptr != NULL)
-	{
-	  partition_cache_dbvalp (var->value.arithptr->thirdptr, val);
-	}
     default:
       break;
     }
