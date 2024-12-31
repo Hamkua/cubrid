@@ -169,7 +169,7 @@ static int partition_attrinfo_get_key (THREAD_ENTRY * thread_p, PRUNING_CONTEXT 
 /* misc pruning functions */
 static bool partition_decrement_value (DB_VALUE * val);
 
-static void partition_cache_dbvalp (REGU_VARIABLE * var, DB_VALUE * val);
+static void partition_set_cache_dbvalp_for_attribute (REGU_VARIABLE * var, DB_VALUE * val);
 static bool partition_supports_pruning_op_for_function (const PRUNING_OP op, const REGU_VARIABLE * part_expr);
 static MATCH_STATUS partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left,
 					   const REGU_VARIABLE * right, REGU_VARIABLE * part_expr, const PRUNING_OP op,
@@ -1975,6 +1975,7 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 	    /* see if part_expr matches right or left */
 	    REGU_VARIABLE *left, *right;
 	    PRUNING_OP op;
+
 	    left = pr->pe.m_eval_term.et.et_comp.lhs;
 	    right = pr->pe.m_eval_term.et.et_comp.rhs;
 	    op = partition_rel_op_to_pruning_op (pr->pe.m_eval_term.et.et_comp.rel_op);
@@ -2101,11 +2102,11 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 		      goto cleanup;
 		    }
 
-		  partition_cache_dbvalp (part_expr, &casted_val);
+		  partition_set_cache_dbvalp_for_attribute (part_expr, &casted_val);
 		}
 	      else
 		{
-		  partition_cache_dbvalp (part_expr, &old_collection_val);
+		  partition_set_cache_dbvalp_for_attribute (part_expr, &old_collection_val);
 		}
 
 	      if (partition_get_value_from_regu_var (pinfo, part_expr, &part_key_val, &is_value) == NO_ERROR)
@@ -2142,11 +2143,11 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 		  goto cleanup;
 		}
 
-	      partition_cache_dbvalp (part_expr, &casted_val);
+	      partition_set_cache_dbvalp_for_attribute (part_expr, &casted_val);
 	    }
 	  else
 	    {
-	      partition_cache_dbvalp (part_expr, &val);
+	      partition_set_cache_dbvalp_for_attribute (part_expr, &val);
 	    }
 
 	  status = partition_prune (pinfo, part_expr, op, pruned);
@@ -2154,7 +2155,7 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
     }
 
 cleanup:
-  partition_cache_dbvalp (part_expr, NULL);
+  partition_set_cache_dbvalp_for_attribute (part_expr, NULL);
   pr_clear_value (&old_collection_val);
   pr_clear_value (&new_collection_val);
   pr_clear_value (&part_key_val);
@@ -2861,7 +2862,7 @@ partition_set_cache_info_for_expr (REGU_VARIABLE * var, ATTR_ID attr_id, HEAP_CA
 }
 
 static void
-partition_cache_dbvalp (REGU_VARIABLE * var, DB_VALUE * val)
+partition_set_cache_dbvalp_for_attribute (REGU_VARIABLE * var, DB_VALUE * val)
 {
   if (var == NULL)
     {
@@ -2875,9 +2876,9 @@ partition_cache_dbvalp (REGU_VARIABLE * var, DB_VALUE * val)
       break;
 
     case TYPE_INARITH:
-      (void) partition_cache_dbvalp (var->value.arithptr->leftptr, val);
-      (void) partition_cache_dbvalp (var->value.arithptr->rightptr, val);
-      (void) partition_cache_dbvalp (var->value.arithptr->thirdptr, val);
+      (void) partition_set_cache_dbvalp_for_attribute (var->value.arithptr->leftptr, val);
+      (void) partition_set_cache_dbvalp_for_attribute (var->value.arithptr->rightptr, val);
+      (void) partition_set_cache_dbvalp_for_attribute (var->value.arithptr->thirdptr, val);
 
     default:
       break;
