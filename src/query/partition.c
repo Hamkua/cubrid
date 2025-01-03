@@ -2702,6 +2702,7 @@ partition_get_position_in_key (PRUNING_CONTEXT * pinfo, BTID * btid)
   return NO_ERROR;
 }
 
+#if defined (ENABLE_UNUSED_FUNCTION)
 /*
  * partition_prune_heap_scan () - prune a access spec for heap scan
  * return : error code or NO_ERROR
@@ -2833,6 +2834,7 @@ partition_prune_index_scan (PRUNING_CONTEXT * pinfo)
 
   return error;
 }
+#endif /* ENABLE_UNUSED_FUNCTION */
 
 /*
  * partition_prune_spec () - perform pruning on an access spec.
