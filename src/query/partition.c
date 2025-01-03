@@ -155,9 +155,10 @@ static MATCH_STATUS partition_prune_hash (PRUNING_CONTEXT * pinfo, const DB_VALU
 					  PRUNING_BITSET * pruned);
 static int partition_find_partition_for_record (PRUNING_CONTEXT * pinfo, const OID * class_oid, RECDES * recdes,
 						OID * partition_oid, HFID * partition_hfid);
+#if defined (ENABLE_UNUSED_FUNCTION)
 static int partition_prune_heap_scan (PRUNING_CONTEXT * pinfo);
-
 static int partition_prune_index_scan (PRUNING_CONTEXT * pinfo);
+#endif /* ENABLE_UNUSED_FUNCTION */
 
 static int partition_find_inherited_btid (THREAD_ENTRY * thread_p, OID * src_class, OID * dest_class, BTID * src_btid,
 					  BTID * dest_btid);
