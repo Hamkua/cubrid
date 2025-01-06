@@ -2075,21 +2075,21 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
       if (db_value_type_is_collection (&val))
 	{
 	  collection = db_get_collection (&val);
-	  new_collection = db_col_copy (collection);
+          DB_TYPE domain_type = DB_VALUE_DOMAIN_TYPE(&val);
+          int size = db_col_size (collection);
+	  new_collection = db_col_create (domain_type, size, NULL);
 
 	  if (new_collection == NULL)
 	    {
 	      goto cleanup;
 	    }
 
-	  int size = db_col_size (new_collection);
-
 	  for (int i = 0; i < size; i++)
 	    {
 	      pr_clear_value (&part_key_val);
 	      pr_clear_value (&old_collection_val);
 
-	      if (db_col_get (new_collection, i, &old_collection_val) != NO_ERROR)
+	      if (db_col_get (collection, i, &old_collection_val) != NO_ERROR)
 		{
 		  goto cleanup;
 		}
