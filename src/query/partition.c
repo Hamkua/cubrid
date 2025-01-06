@@ -2070,15 +2070,22 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
   TP_DOMAIN_STATUS dom_status;
   bool is_value;
 
+  db_make_null (&val);
+  db_make_null (&casted_val);
+  db_make_null (&part_key_val);
+
   if (partition_get_value_from_regu_var (pinfo, right, &val, &is_value) == NO_ERROR)
     {
       if (db_value_type_is_collection (&val))
 	{
-	  collection = db_get_collection (&val);
-          DB_TYPE domain_type = DB_VALUE_DOMAIN_TYPE(&val);
-          int size = db_col_size (collection);
-	  new_collection = db_col_create (domain_type, size, NULL);
+	  db_make_null (&old_collection_val);
+	  db_make_null (&new_collection_val);
 
+	  DB_TYPE domain_type = DB_VALUE_DOMAIN_TYPE (&val);
+	  collection = db_get_collection (&val);
+	  int size = db_col_size (collection);
+
+	  new_collection = db_col_create (domain_type, size, NULL);
 	  if (new_collection == NULL)
 	    {
 	      goto cleanup;
@@ -2088,6 +2095,7 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
 	    {
 	      pr_clear_value (&part_key_val);
 	      pr_clear_value (&old_collection_val);
+	      pr_clear_value (&casted_val);
 
 	      if (db_col_get (collection, i, &old_collection_val) != NO_ERROR)
 		{
