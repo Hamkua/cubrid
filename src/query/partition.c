@@ -1727,6 +1727,10 @@ partition_is_reguvar_const (const REGU_VARIABLE * regu_var)
       }
     case TYPE_ATTR_ID:
       {
+	/* For TYPE_ATTR_ID, if cache_dbvalp is not NULL, it means the attribute value 
+	 * has been cached and can be treated as a constant.
+	 * This happens when attribute values are cached in pred_expr's attr_cache.
+	 * See fetch_peek_dbval for details. */
 	if (regu_var->value.attr_descr.cache_dbvalp == NULL)
 	  {
 	    return false;
@@ -2872,6 +2876,8 @@ partition_set_cache_dbvalp_for_attribute (REGU_VARIABLE * var, DB_VALUE * val)
   switch (var->type)
     {
     case TYPE_ATTR_ID:
+      /* Since partition key expression can only contain a single column,
+       * we can skip checking attribute id and simply check if the value is cached. */
       var->value.attr_descr.cache_dbvalp = val;
       break;
 
