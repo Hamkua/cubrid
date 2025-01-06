@@ -2215,7 +2215,7 @@ partition_do_regu_variables_contain (PRUNING_CONTEXT * pinfo, const REGU_VARIABL
 {
   if (left == NULL || right == NULL)
     {
-      return left == right;
+      return false;
     }
 
   if (left->type != TYPE_ATTR_ID)
