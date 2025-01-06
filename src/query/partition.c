@@ -1346,9 +1346,6 @@ partition_prune_range (PRUNING_CONTEXT * pinfo, const DB_VALUE * val, const PRUN
   int rmin = DB_UNK, rmax = DB_UNK;
   MATCH_STATUS status;
 
-  db_make_null (&min);
-  db_make_null (&max);
-
   if (db_value_type_is_collection (val))
     {
       PRUNING_BITSET new_pruned;
@@ -1395,8 +1392,11 @@ partition_prune_range (PRUNING_CONTEXT * pinfo, const DB_VALUE * val, const PRUN
 	  pr_clear_value (&col);
 	}
 
-      goto cleanup;
+      return status;
     }
+
+  db_make_null (&min);
+  db_make_null (&max);
 
   for (i = 0; i < PARTITIONS_COUNT (pinfo); i++)
     {
