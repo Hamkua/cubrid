@@ -1346,6 +1346,9 @@ partition_prune_range (PRUNING_CONTEXT * pinfo, const DB_VALUE * val, const PRUN
   int rmin = DB_UNK, rmax = DB_UNK;
   MATCH_STATUS status;
 
+  db_make_null (&min);
+  db_make_null (&max);
+
   if (db_value_type_is_collection (val))
     {
       PRUNING_BITSET new_pruned;
@@ -1394,9 +1397,6 @@ partition_prune_range (PRUNING_CONTEXT * pinfo, const DB_VALUE * val, const PRUN
 
       goto cleanup;
     }
-
-  db_make_null (&min);
-  db_make_null (&max);
 
   for (i = 0; i < PARTITIONS_COUNT (pinfo); i++)
     {
@@ -2073,23 +2073,17 @@ partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, cons
   db_make_null (&val);
   db_make_null (&casted_val);
   db_make_null (&part_key_val);
+  db_make_null (&old_collection_val);
+  db_make_null (&new_collection_val);
 
   if (partition_get_value_from_regu_var (pinfo, right, &val, &is_value) == NO_ERROR)
     {
       if (db_value_type_is_collection (&val))
 	{
-	  db_make_null (&old_collection_val);
-	  db_make_null (&new_collection_val);
-
 	  DB_TYPE domain_type = DB_VALUE_DOMAIN_TYPE (&val);
 	  collection = db_get_collection (&val);
 	  int size = db_col_size (collection);
-
 	  new_collection = db_col_create (domain_type, size, NULL);
-	  if (new_collection == NULL)
-	    {
-	      goto cleanup;
-	    }
 
 	  for (int i = 0; i < size; i++)
 	    {
