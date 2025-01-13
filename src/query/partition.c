@@ -171,9 +171,9 @@ static bool partition_decrement_value (DB_VALUE * val);
 
 static void partition_set_cache_dbvalp_for_attribute (REGU_VARIABLE * var, DB_VALUE * val);
 static bool partition_supports_pruning_op_for_function (const PRUNING_OP op, const REGU_VARIABLE * part_expr);
-static MATCH_STATUS partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left,
-					   const REGU_VARIABLE * right, REGU_VARIABLE * part_expr, const PRUNING_OP op,
-					   PRUNING_BITSET * pruned);
+static MATCH_STATUS partition_prune_for_function (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left,
+						  const REGU_VARIABLE * right, REGU_VARIABLE * part_expr,
+						  const PRUNING_OP op, PRUNING_BITSET * pruned);
 
 /* PRUNING_BITSET manipulation functions */
 
@@ -1997,11 +1997,11 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 	      {
 		if (partition_do_regu_variables_contain (pinfo, left, part_expr))
 		  {
-		    status = partition_prune_arith (pinfo, left, right, part_expr, op, pruned);
+		    status = partition_prune_for_function (pinfo, left, right, part_expr, op, pruned);
 		  }
 		else if (partition_do_regu_variables_contain (pinfo, right, part_expr))
 		  {
-		    status = partition_prune_arith (pinfo, right, left, part_expr, op, pruned);
+		    status = partition_prune_for_function (pinfo, right, left, part_expr, op, pruned);
 		  }
 	      }
 	    break;
@@ -2035,7 +2035,7 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 	      {
 		if (partition_do_regu_variables_contain (pinfo, regu, part_expr))
 		  {
-		    status = partition_prune_arith (pinfo, regu, list, part_expr, op, pruned);
+		    status = partition_prune_for_function (pinfo, regu, list, part_expr, op, pruned);
 		  }
 	      }
 	  }
@@ -2059,7 +2059,7 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
 }
 
 /*
- * partition_prune_arith () - perform pruning on the specified partitions list based on partition key expression
+ * partition_prune_for_function () - perform pruning on the specified partitions list based on partition key expression
  * return : match status
  * pinfo (in)	  : pruning context
  * left (in)	  : left operand
@@ -2069,8 +2069,8 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
  * pruned (in/out): pruned partitions
  */
 static MATCH_STATUS
-partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, const REGU_VARIABLE * right,
-		       REGU_VARIABLE * part_expr, const PRUNING_OP op, PRUNING_BITSET * pruned)
+partition_prune_for_function (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, const REGU_VARIABLE * right,
+			      REGU_VARIABLE * part_expr, const PRUNING_OP op, PRUNING_BITSET * pruned)
 {
   MATCH_STATUS status = MATCH_NOT_FOUND;
   DB_VALUE val, casted_val;
