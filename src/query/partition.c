@@ -2058,6 +2058,16 @@ partition_match_pred_expr (PRUNING_CONTEXT * pinfo, const PRED_EXPR * pr, PRUNIN
   return status;
 }
 
+/*
+ * partition_prune_arith () - perform pruning on the specified partitions list based on partition key expression
+ * return : match status
+ * pinfo (in)	  : pruning context
+ * left (in)	  : left operand
+ * right (in)	  : right operand
+ * part_expr (in) : partition key expression
+ * op (in)	  : pruning operator
+ * pruned (in/out): pruned partitions
+ */
 static MATCH_STATUS
 partition_prune_arith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, const REGU_VARIABLE * right,
 		       REGU_VARIABLE * part_expr, const PRUNING_OP op, PRUNING_BITSET * pruned)
@@ -2171,6 +2181,13 @@ cleanup:
   return status;
 }
 
+/*
+ * partition_supports_pruning_op_for_function () - check if the specified pruning operator is supported for the
+ *						     specified partition key expression
+ * return : true if supported, false otherwise
+ * op (in)	  : pruning operator
+ * part_expr (in) : partition key expression
+ */
 static bool
 partition_supports_pruning_op_for_function (const PRUNING_OP op, const REGU_VARIABLE * part_expr)
 {
@@ -2210,6 +2227,13 @@ partition_supports_pruning_op_for_function (const PRUNING_OP op, const REGU_VARI
 
 }
 
+/*
+ * partition_do_regu_variables_contain () - check if the left regu variable contains the right regu variable
+ * return : true if the left regu variable contains the right regu variable, false otherwise
+ * pinfo (in) : pruning context
+ * left (in)  : left regu variable, must be TYPE_ATTR_ID
+ * right (in) : right regu variable
+ */
 static bool
 partition_do_regu_variables_contain (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * left, const REGU_VARIABLE * right)
 {
@@ -2867,6 +2891,13 @@ partition_set_cache_info_for_expr (REGU_VARIABLE * var, ATTR_ID attr_id, HEAP_CA
     }
 }
 
+/*
+ * partition_set_cache_dbvalp_for_attribute () - set cache_dbvalp for the
+ *					  partition key expression
+ * return : void
+ * var (in/out) : expression to cache
+ * val (in) : value to be cached
+ */
 static void
 partition_set_cache_dbvalp_for_attribute (REGU_VARIABLE * var, DB_VALUE * val)
 {
