@@ -1727,10 +1727,10 @@ partition_is_reguvar_const (const REGU_VARIABLE * regu_var)
       }
     case TYPE_ATTR_ID:
       {
-	/* For TYPE_ATTR_ID, if cache_dbvalp is not NULL, it means the attribute value 
-	 * has been cached and can be treated as a constant.
-	 * This happens when attribute values are cached in pred_expr's attr_cache.
-	 * See fetch_peek_dbval for details. */
+	/* TYPE_ATTR_ID normally represents a non-constant.
+	 * As an exception, in partition.c, partition_set_cache_dbvalp_for_attribute
+	 * can cache a db_value in cache_dbvalp for TYPE_ATTR_ID.
+	 * This cached value is used specifically for partition pruning purposes. */
 	if (regu_var->value.attr_descr.cache_dbvalp == NULL)
 	  {
 	    return false;
