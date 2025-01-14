@@ -2093,7 +2093,18 @@ partition_prune_for_function (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * lef
 	  DB_TYPE domain_type = DB_VALUE_DOMAIN_TYPE (&val);
 	  collection = db_get_collection (&val);
 	  int size = db_col_size (collection);
+	  if (size <= 0)
+	    {
+	      pinfo->error_code = ER_FAILED;
+	      goto cleanup;
+	    }
+
 	  new_collection = db_col_create (domain_type, size, NULL);
+	  if (new_collection == NULL)
+	    {
+	      pinfo->error_code = ER_FAILED;
+	      goto cleanup;
+	    }
 
 	  for (int i = 0; i < size; i++)
 	    {
@@ -2103,6 +2114,7 @@ partition_prune_for_function (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * lef
 
 	      if (db_col_get (collection, i, &old_collection_val) != NO_ERROR)
 		{
+		  pinfo->error_code = ER_FAILED;
 		  goto cleanup;
 		}
 
@@ -2129,10 +2141,15 @@ partition_prune_for_function (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * lef
 		{
 		  if (is_value)
 		    {
-		      db_col_put (new_collection, i, &part_key_val);
+		      if (db_col_put (new_collection, i, &part_key_val) != NO_ERROR)
+			{
+			  pinfo->error_code = ER_FAILED;
+			  goto cleanup;
+			}
 		    }
 		  else
 		    {
+		      pinfo->error_code = ER_FAILED;
 		      goto cleanup;
 		    }
 		}
@@ -2140,6 +2157,7 @@ partition_prune_for_function (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * lef
 
 	  if (db_make_collection (&new_collection_val, new_collection) != NO_ERROR)
 	    {
+	      pinfo->error_code = ER_FAILED;
 	      goto cleanup;
 	    }
 
@@ -2171,6 +2189,11 @@ partition_prune_for_function (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * lef
     }
 
 cleanup:
+  if (pinfo->error_code != NO_ERROR)
+    {
+      status = MATCH_NOT_FOUND;
+    }
+
   partition_set_cache_dbvalp_for_attribute (part_expr, NULL);
   pr_clear_value (&old_collection_val);
   pr_clear_value (&new_collection_val);
