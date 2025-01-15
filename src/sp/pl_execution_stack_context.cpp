@@ -45,23 +45,19 @@ namespace cubpl
     if (m_session)
       {
 	m_client_header.id = m_session->get_id ();
+	m_java_header.id = m_session->get_id ();
       }
   }
 
   execution_stack::~execution_stack ()
   {
-    if (m_session)
-      {
-	// retire connection
-	if (m_connection)
-	  {
-	    m_connection.reset ();
-	  }
-      }
-
     destory_all_cursors ();
 
-    m_session->pop_and_destroy_stack (get_id ());
+    if (m_session)
+      {
+	m_session->release_connection (m_connection); // release connection to session
+	m_session->pop_and_destroy_stack (get_id ());
+      }
   }
 
   void
@@ -76,8 +72,26 @@ namespace cubpl
     m_stack_handler_id.erase (handler_id);
   }
 
+  void
+  execution_stack::reset_query_handlers ()
+  {
+    if (m_stack_handler_id.empty ())
+      {
+	// do nothing
+	return;
+      }
+
+    set_cs_command (METHOD_REQUEST_END);
+    std::vector<int> handler_vec (m_stack_handler_id.begin (), m_stack_handler_id.end ());
+    send_data_to_client (handler_vec);
+    m_stack_handler_id.clear ();
+
+    // restore to callback mode
+    set_cs_command (METHOD_REQUEST_CALLBACK);
+  }
+
   int
-  execution_stack::add_cursor (QUERY_ID query_id, bool oid_included)
+  execution_stack::add_cursor (int handler_id, QUERY_ID query_id, bool oid_included)
   {
     if (query_id == NULL_QUERY_ID || query_id >= SHRT_MAX)
       {
@@ -86,6 +100,7 @@ namespace cubpl
       }
 
     m_stack_cursor_id.insert (query_id);
+    m_stack_cursor_map[query_id] = handler_id;
 
     query_cursor *cursor = m_session->create_cursor (m_thread_p, query_id, oid_included);
     return cursor ? NO_ERROR : ER_FAILED;
@@ -103,21 +118,19 @@ namespace cubpl
       }
 
     cursor = m_session->get_cursor (m_thread_p, query_id);
-
-    /*
     if (cursor == nullptr)
-    {
-        if (m_session->is_session_cursor (query_id))
-        {
-            cursor = m_session->create_cursor (m_thread_p, query_id, false);
-            if (cursor)
-                {
-                  // add to the clearing list at the end of stack
-                  m_stack_cursor_id.insert (query_id);
-                }
-        }
-    }
-    */
+      {
+	if (m_session->is_session_cursor (query_id))
+	  {
+	    cursor = m_session->create_cursor (m_thread_p, query_id, false);
+	    if (cursor)
+	      {
+		// add to the clearing list at the end of stack
+		m_session->remove_session_cursor (m_thread_p, query_id);
+		m_stack_cursor_id.insert (query_id);
+	      }
+	  }
+      }
 
     return cursor;
   }
@@ -125,15 +138,16 @@ namespace cubpl
   void
   execution_stack::promote_to_session_cursor (QUERY_ID query_id)
   {
-    m_session->add_session_cursor (m_thread_p, query_id);
-
-    query_cursor *cursor = m_session->get_cursor (m_thread_p, query_id);
-    if (cursor)
+    if (query_id == NULL_QUERY_ID)
       {
-	cursor->change_owner (nullptr);
+	return;
       }
 
+    m_session->add_session_cursor (m_thread_p, query_id);
+
+    // remove from stack resource
     m_stack_cursor_id.erase (query_id);
+    m_stack_handler_id.erase (m_stack_cursor_map[query_id]);
   }
 
   void
@@ -156,13 +170,8 @@ namespace cubpl
   {
     if (m_connection == nullptr)
       {
-	connection_pool *pool = get_connection_pool ();
-	if (pool)
-	  {
-	    m_connection = pool->claim ();
-	  }
+	m_connection = m_session->claim_connection ();
       }
-
     return m_connection;
   }
 
