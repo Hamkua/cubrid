@@ -155,9 +155,10 @@ static MATCH_STATUS partition_prune_hash (PRUNING_CONTEXT * pinfo, const DB_VALU
 					  PRUNING_BITSET * pruned);
 static int partition_find_partition_for_record (PRUNING_CONTEXT * pinfo, const OID * class_oid, RECDES * recdes,
 						OID * partition_oid, HFID * partition_hfid);
+#if defined (ENABLE_UNUSED_FUNCTION)
 static int partition_prune_heap_scan (PRUNING_CONTEXT * pinfo);
-
 static int partition_prune_index_scan (PRUNING_CONTEXT * pinfo);
+#endif /* ENABLE_UNUSED_FUNCTION */
 
 static int partition_find_inherited_btid (THREAD_ENTRY * thread_p, OID * src_class, OID * dest_class, BTID * src_btid,
 					  BTID * dest_btid);
@@ -2702,6 +2703,7 @@ partition_get_position_in_key (PRUNING_CONTEXT * pinfo, BTID * btid)
   return NO_ERROR;
 }
 
+#if defined (ENABLE_UNUSED_FUNCTION)
 /*
  * partition_prune_heap_scan () - prune a access spec for heap scan
  * return : error code or NO_ERROR
@@ -2833,6 +2835,7 @@ partition_prune_index_scan (PRUNING_CONTEXT * pinfo)
 
   return error;
 }
+#endif /* ENABLE_UNUSED_FUNCTION */
 
 /*
  * partition_prune_spec () - perform pruning on an access spec.
@@ -2845,6 +2848,8 @@ partition_prune_spec (THREAD_ENTRY * thread_p, val_descr * vd, access_spec_node 
 {
   int error = NO_ERROR;
   PRUNING_CONTEXT pinfo;
+  PRUNING_BITSET pruned, pruned_pred, pruned_key, pruned_range;
+  MATCH_STATUS status = MATCH_NOT_FOUND;
 
   if (spec == NULL)
     {
@@ -2888,54 +2893,78 @@ partition_prune_spec (THREAD_ENTRY * thread_p, val_descr * vd, access_spec_node 
   pinfo.spec = spec;
   pinfo.vd = vd;
 
-  if (spec->access == ACCESS_METHOD_SEQUENTIAL || spec->access == ACCESS_METHOD_SEQUENTIAL_RECORD_INFO
-      || spec->access == ACCESS_METHOD_SEQUENTIAL_PAGE_SCAN || spec->access == ACCESS_METHOD_SEQUENTIAL_SAMPLING_SCAN)
-    {
-      error = partition_prune_heap_scan (&pinfo);
-      if (error != NO_ERROR)
-	{
-	  ASSERT_ERROR ();
-	}
-    }
-  else
-    {
-      if (spec->indexptr == NULL)
-	{
-	  assert (false);
+  /* set all bits of pruned to 1 */
+  pruningset_init (&pruned, PARTITIONS_COUNT (&pinfo));
+  pruningset_set_all (&pruned);
 
-	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_GENERIC_ERROR, 0);
-	  partition_clear_pruning_context (&pinfo);
-	  return ER_FAILED;
-	}
+  /* set bits matching pred_expr condition to 1 and intersect with pruned
+   * if no partitions match pred_expr condition, skip intersection */
+  if (pinfo.spec->where_pred != NULL)
+    {
+      pruningset_init (&pruned_pred, PARTITIONS_COUNT (&pinfo));
 
-      if (pinfo.partition_pred->func_regu->type != TYPE_ATTR_ID)
+      status = partition_match_pred_expr (&pinfo, pinfo.spec->where_pred, &pruned_pred);
+      if (status == MATCH_NOT_FOUND)
 	{
-	  /* In the case of index keys, we will only apply pruning if the partition expression is actually an
-	   * attribute. This is because we will not have expressions in the index key, only attributes (except for
-	   * function and filter indexes which are not handled yet) */
-	  pinfo.attr_position = -1;
+	  if (pinfo.error_code != NO_ERROR)
+	    {
+	      ASSERT_ERROR ();
+	      error = pinfo.error_code;
+	      goto error_exit;
+	    }
 	}
       else
 	{
-	  BTID *btid = &spec->indexptr->btid;
-	  error = partition_get_position_in_key (&pinfo, btid);
-	  if (error != NO_ERROR)
-	    {
-	      ASSERT_ERROR ();
-	      partition_clear_pruning_context (&pinfo);
-	      return error;
-	    }
-	}
-      error = partition_prune_index_scan (&pinfo);
-      if (error != NO_ERROR)
-	{
-	  ASSERT_ERROR ();
+	  pruningset_intersect (&pruned, &pruned_pred);
 	}
     }
 
-  partition_clear_pruning_context (&pinfo);
+  if (pinfo.spec->where_key != NULL)
+    {
+      pruningset_init (&pruned_key, PARTITIONS_COUNT (&pinfo));
 
-  if (error == NO_ERROR)
+      status = partition_match_pred_expr (&pinfo, pinfo.spec->where_key, &pruned_key);
+      if (status == MATCH_NOT_FOUND)
+	{
+	  if (pinfo.error_code != NO_ERROR)
+	    {
+	      ASSERT_ERROR ();
+	      error = pinfo.error_code;
+	      goto error_exit;
+	    }
+	}
+      else
+	{
+	  pruningset_intersect (&pruned, &pruned_key);
+	}
+    }
+
+  if (pinfo.spec->where_range != NULL)
+    {
+      pruningset_init (&pruned_range, PARTITIONS_COUNT (&pinfo));
+      status = partition_match_pred_expr (&pinfo, pinfo.spec->where_range, &pruned_range);
+      if (status == MATCH_NOT_FOUND)
+	{
+	  if (pinfo.error_code != NO_ERROR)
+	    {
+	      ASSERT_ERROR ();
+	      error = pinfo.error_code;
+	      goto error_exit;
+	    }
+	}
+      else
+	{
+	  pruningset_intersect (&pruned, &pruned_range);
+	}
+    }
+
+  error = pruningset_to_spec_list (&pinfo, &pruned);
+  if (error != NO_ERROR)
+    {
+      ASSERT_ERROR ();
+      goto error_exit;
+    }
+  else
     {
       spec->pruned = true;
     }
@@ -2949,6 +2978,9 @@ partition_prune_spec (THREAD_ENTRY * thread_p, val_descr * vd, access_spec_node 
 	  memset (&curr_part->scan_stats, 0, sizeof (SCAN_STATS));
 	}
     }
+
+error_exit:
+  partition_clear_pruning_context (&pinfo);
 
   return error;
 }
