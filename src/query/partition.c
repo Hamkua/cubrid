@@ -1650,15 +1650,30 @@ partition_get_value_from_regu_var (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE 
 
     case TYPE_FUNC:
       {
-	if (regu->value.funcp->ftype != F_MIDXKEY)
+	if (regu->value.funcp->ftype == F_MIDXKEY)
+	  {
+	    if (partition_get_value_from_key (pinfo, regu, value_p, is_value) != NO_ERROR)
+	      {
+		goto error;
+	      }
+	  }
+	else if (regu->value.funcp->ftype == F_ELT || regu->value.funcp->ftype == F_INSERT_SUBSTRING)
+	  {
+	    /* 
+	     * Exceptionally use partition_get_value_from_inarith for these specific functions
+	     * as they can be evaluated in the same way as arithmetic operations.
+	     * Other TYPE_FUNC types are not handled here.
+	     */
+	    if (partition_get_value_from_inarith (pinfo, regu, value_p, is_value) != NO_ERROR)
+	      {
+		goto error;
+	      }
+	  }
+	else
 	  {
 	    *is_value = false;
 	    db_make_null (value_p);
 	    return NO_ERROR;
-	  }
-	if (partition_get_value_from_key (pinfo, regu, value_p, is_value) != NO_ERROR)
-	  {
-	    goto error;
 	  }
 	break;
       }
@@ -1696,6 +1711,8 @@ error:
 static bool
 partition_is_reguvar_const (const REGU_VARIABLE * regu_var)
 {
+  REGU_VARIABLE_LIST op;
+
   if (regu_var == NULL)
     {
       return false;
@@ -1724,6 +1741,19 @@ partition_is_reguvar_const (const REGU_VARIABLE * regu_var)
 	    return false;
 	  }
 	/* either all arguments are constants of this is an expression with no arguments */
+	return true;
+      }
+    case TYPE_FUNC:
+      {
+	op = regu_var->value.funcp->operand;
+	while (op != NULL)
+	  {
+	    if (!partition_is_reguvar_const (&op->value))
+	      {
+		return false;
+	      }
+	    op = op->next;
+	  }
 	return true;
       }
     case TYPE_ATTR_ID:
@@ -1843,14 +1873,17 @@ partition_get_value_from_key (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * key
 }
 
 /*
- * partition_get_value_from_key () - get a value from a reguvariable of type
- *				     INARITH
+ * partition_get_value_from_inarith () - get a value from a reguvariable of type TYPE_INARITH, TYPE_FUNC (pseudo constants)
  * return : error code or NO_ERROR
  * pinfo (in)		: pruning context
  * src (in)		: source reguvariable
  * value_p (in/out)	: the requested value
  * is_value (in/out)	: set to true if the value was successfully fetched
  *
+ * Note: This function is primarily used for TYPE_INARITH operations.
+ *       Additionally, it handles F_ELT and F_INSERT_SUBSTRING functions since they
+ *       can be evaluated in the same way as arithmetic operations.
+ *       Other TYPE_FUNC types are not handled here.
  */
 static int
 partition_get_value_from_inarith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * src, DB_VALUE * value_p,
@@ -1861,7 +1894,7 @@ partition_get_value_from_inarith (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE *
 
   assert_release (src != NULL);
   assert_release (value_p != NULL);
-  assert_release (src->type == TYPE_INARITH);
+  assert_release (src->type == TYPE_INARITH || src->type == TYPE_FUNC);
 
   *is_value = false;
   db_make_null (value_p);
@@ -2216,13 +2249,12 @@ static bool
 partition_supports_pruning_op_for_function (const PRUNING_OP op, const REGU_VARIABLE * part_expr)
 {
   OPERATOR_TYPE opcode;
+  FUNC_CODE func_code;
 
-  if (part_expr->type != TYPE_INARITH)
+  if (part_expr->type != TYPE_INARITH && part_expr->type != TYPE_FUNC)
     {
       return false;
     }
-
-  opcode = part_expr->value.arithptr->opcode;
 
   switch (op)
     {
@@ -2230,21 +2262,41 @@ partition_supports_pruning_op_for_function (const PRUNING_OP op, const REGU_VARI
     case PO_LE:
     case PO_GT:
     case PO_GE:
-      switch (opcode)
+      if (part_expr->type == TYPE_INARITH)
 	{
-	case T_YEAR:
-	case T_TODAYS:
-	case T_UNIX_TIMESTAMP:
-	  return true;
-	default:
-	  return false;
+	  opcode = part_expr->value.arithptr->opcode;
+
+	  switch (opcode)
+	    {
+	    case T_YEAR:
+	    case T_TODAYS:
+	    case T_UNIX_TIMESTAMP:
+	      return true;
+	    default:
+	      return false;
+	    }
 	}
+      return false;
+
     case PO_EQ:
     case PO_NE:
     case PO_IN:
     case PO_NOT_IN:
     case PO_IS_NULL:
+      if (part_expr->type == TYPE_FUNC)
+	{
+	  func_code = part_expr->value.funcp->ftype;
+	  switch (func_code)
+	    {
+	    case F_ELT:
+	    case F_INSERT_SUBSTRING:
+	      return true;
+	    default:
+	      return false;
+	    }
+	}
       return true;
+
     default:
       return false;
     }
@@ -2302,6 +2354,22 @@ partition_do_regu_variables_contain (PRUNING_CONTEXT * pinfo, const REGU_VARIABL
 	  if (partition_do_regu_variables_contain (pinfo, left, right->value.arithptr->thirdptr))
 	    {
 	      return true;
+	    }
+	}
+      return false;
+
+    case TYPE_FUNC:
+      if (right->value.funcp->operand != NULL)
+	{
+	  REGU_VARIABLE_LIST op = right->value.funcp->operand;
+
+	  while (op != NULL)
+	    {
+	      if (partition_do_regu_variables_contain (pinfo, left, &op->value))
+		{
+		  return true;
+		}
+	      op = op->next;
 	    }
 	}
       return false;
@@ -2925,6 +2993,7 @@ partition_set_cache_info_for_expr (REGU_VARIABLE * var, ATTR_ID attr_id, HEAP_CA
 static void
 partition_set_cache_dbvalp_for_attribute (REGU_VARIABLE * var, DB_VALUE * val)
 {
+  REGU_VARIABLE_LIST op = NULL;
   if (var == NULL)
     {
       return;
@@ -2942,9 +3011,19 @@ partition_set_cache_dbvalp_for_attribute (REGU_VARIABLE * var, DB_VALUE * val)
       (void) partition_set_cache_dbvalp_for_attribute (var->value.arithptr->leftptr, val);
       (void) partition_set_cache_dbvalp_for_attribute (var->value.arithptr->rightptr, val);
       (void) partition_set_cache_dbvalp_for_attribute (var->value.arithptr->thirdptr, val);
+      break;
+    case TYPE_FUNC:
+      op = var->value.funcp->operand;
+
+      while (op != NULL)
+	{
+	  (void) partition_set_cache_dbvalp_for_attribute (&op->value, val);
+	  op = op->next;
+	}
+      break;
 
     default:
-      break;
+      return;
     }
 }
 
