@@ -2248,59 +2248,55 @@ cleanup:
 static bool
 partition_supports_pruning_op_for_function (const PRUNING_OP op, const REGU_VARIABLE * part_expr)
 {
-  OPERATOR_TYPE opcode;
-  FUNC_CODE func_code;
-
-  if (part_expr->type != TYPE_INARITH && part_expr->type != TYPE_FUNC)
+  if (part_expr->type != TYPE_INARITH)
     {
       return false;
     }
 
-  switch (op)
+  switch (part_expr->value.arithptr->opcode)
     {
-    case PO_LT:
-    case PO_LE:
-    case PO_GT:
-    case PO_GE:
-      if (part_expr->type == TYPE_INARITH)
+      /* although partition key expressions allow various functions and types,
+       * partition pruning is restricted to functions returning integer types */
+    case T_YEAR:
+    case T_TODAYS:
+    case T_UNIX_TIMESTAMP:
+      if (op == PO_EQ || op == PO_IN || op == PO_GE || op == PO_GT || op == PO_LE || op == PO_LT)
 	{
-	  opcode = part_expr->value.arithptr->opcode;
-
-	  switch (opcode)
-	    {
-	    case T_YEAR:
-	    case T_TODAYS:
-	    case T_UNIX_TIMESTAMP:
-	      return true;
-	    default:
-	      return false;
-	    }
+	  return true;
 	}
-      return false;
+      break;
 
-    case PO_EQ:
-    case PO_NE:
-    case PO_IN:
-    case PO_NOT_IN:
-    case PO_IS_NULL:
-      if (part_expr->type == TYPE_FUNC)
+    case T_ADD:
+    case T_SUB:
+    case T_MUL:
+    case T_DIV:
+    case T_ABS:
+    case T_CEIL:
+    case T_DATEDIFF:
+    case T_DAY:
+    case T_DAYOFWEEK:
+    case T_DAYOFYEAR:
+    case T_EXTRACT:
+    case T_FLOOR:
+    case T_HOUR:
+    case T_SECOND:
+    case T_MINUTE:
+    case T_MOD:
+    case T_MONTH:
+    case T_QUARTER:
+    case T_TIMETOSEC:
+    case T_WEEKDAY:
+      if (op == PO_EQ || op == PO_IN)
 	{
-	  func_code = part_expr->value.funcp->ftype;
-	  switch (func_code)
-	    {
-	    case F_ELT:
-	    case F_INSERT_SUBSTRING:
-	      return true;
-	    default:
-	      return false;
-	    }
+	  return true;
 	}
-      return true;
+      break;
 
     default:
-      return false;
+      break;
     }
 
+  return false;
 }
 
 /*
