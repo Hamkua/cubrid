@@ -2114,6 +2114,12 @@ partition_prune_for_function (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * lef
   TP_DOMAIN_STATUS dom_status;
   bool is_value;
 
+  if (right == NULL)
+    {
+      status = partition_prune (pinfo, right, op, pruned);
+      return status;
+    }
+
   db_make_null (&val);
   db_make_null (&casted_val);
   db_make_null (&part_key_val);
@@ -2152,7 +2158,17 @@ partition_prune_for_function (PRUNING_CONTEXT * pinfo, const REGU_VARIABLE * lef
 		  goto cleanup;
 		}
 
-	      if (TP_DOMAIN_TYPE (left->domain) != DB_VALUE_TYPE (&old_collection_val))
+	      if (db_value_is_null (&old_collection_val))
+		{
+		  if (db_col_put (new_collection, i, &old_collection_val) != NO_ERROR)
+		    {
+		      pinfo->error_code = ER_FAILED;
+		      goto cleanup;
+		    }
+		  continue;
+		}
+
+	      else if (TP_DOMAIN_TYPE (left->domain) != DB_VALUE_TYPE (&old_collection_val))
 		{
 		  dom_status = tp_value_cast (&old_collection_val, &casted_val, left->domain, false);
 
