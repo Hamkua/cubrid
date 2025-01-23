@@ -2260,11 +2260,7 @@ partition_supports_pruning_op_for_function (const PRUNING_OP op, const REGU_VARI
     case T_YEAR:
     case T_TODAYS:
     case T_UNIX_TIMESTAMP:
-      if (op == PO_EQ || op == PO_IN || op == PO_GE || op == PO_GT || op == PO_LE || op == PO_LT)
-	{
-	  return true;
-	}
-      break;
+      return true;
 
     case T_ADD:
     case T_SUB:
@@ -2286,7 +2282,7 @@ partition_supports_pruning_op_for_function (const PRUNING_OP op, const REGU_VARI
     case T_QUARTER:
     case T_TIMETOSEC:
     case T_WEEKDAY:
-      if (op == PO_EQ || op == PO_IN)
+      if (op != PO_LT && op != PO_LE && op != PO_GT && op != PO_GE)
 	{
 	  return true;
 	}
