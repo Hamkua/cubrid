@@ -16688,6 +16688,17 @@ pt_to_buildlist_proc (PARSER_CONTEXT * parser, PT_NODE * select_node, QO_PLAN * 
 	      goto analytic_exit_on_error;
 	    }
 
+	  int *attr_offsets;
+	  attr_offsets = pt_make_identity_offsets (select_list_ex);
+
+	  buildlist->a_scan_regu_list =
+	    pt_to_regu_variable_list (parser, select_list_ex, UNBOX_AS_VALUE, buildlist->a_val_list, attr_offsets);
+
+	  if (attr_offsets != NULL)
+	    {
+	      free_and_init (attr_offsets);
+	    }
+
 	  /* generate regu list (identity fetching from temp tuple) */
 	  buildlist->a_regu_list =
 	    pt_to_position_regu_variable_list (parser, select_list_ex, buildlist->a_val_list, NULL);
@@ -24523,6 +24534,11 @@ pt_to_analytic_final_node (PARSER_CONTEXT * parser, PT_NODE * tree, PT_NODE ** e
       return NULL;
     }
 
+  if (PT_IS_VALUE_NODE (tree))
+    {
+      return tree;
+    }
+
   if (PT_IS_ANALYTIC_NODE (tree))
     {
       /* select ntile(select stddev(...)...)... from ... is allowed */
@@ -25142,6 +25158,11 @@ pt_substitute_analytic_references (PARSER_CONTEXT * parser, PT_NODE * node, PT_N
   if (node == NULL)
     {
       /* nothing to do */
+      return node;
+    }
+
+  if (PT_IS_VALUE_NODE (node))
+    {
       return node;
     }
 
