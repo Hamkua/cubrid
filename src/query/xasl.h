@@ -161,6 +161,7 @@ using PRED_EXPR = cubxasl::pred_expr;
 // *INDENT-ON*
 
 #if defined (SERVER_MODE) || defined (SA_MODE)
+typedef struct analytic_stat ANALYTIC_STATS;
 typedef struct groupby_stat GROUPBY_STATS;
 typedef struct orderby_stat ORDERBY_STATS;
 typedef struct xasl_stat XASL_STATS;
@@ -970,6 +971,17 @@ struct groupby_stat
   bool groupby_sort;
 };
 
+struct analytic_stat
+{
+  struct timeval analytic_time;
+  UINT64 analytic_pages;
+  UINT64 analytic_ioreads;
+  int rows;
+  bool run_analytic;
+  int analytic_unsorted_count;
+  int analytic_total_count;
+};
+
 struct xasl_stat
 {
   struct timeval elapsed_time;
@@ -1152,6 +1164,7 @@ struct xasl_node
 #if defined (SERVER_MODE) || defined (SA_MODE)
   ORDERBY_STATS orderby_stats;
   GROUPBY_STATS groupby_stats;
+  ANALYTIC_STATS analytic_stats;
   XASL_STATS xasl_stats;
   FUNC_STATS func_stats;
 
